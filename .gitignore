@@ -52,3 +52,6 @@ venv/
 *.pth
 *.onnx
 *.pkl
+
+AGENTS.md
+CLAUDE.MD
