@@ -239,9 +239,10 @@ M6 ▓▓▓ (later)  fine-tuning
 
 ---
 
-## Immediate next actions (today)
-1. Create the repo skeleton + `environment.yml`; build and smoke-test the env.
-2. Pick the one test animal; fill `config/animals/<id>.yml` (paths, panel, channel map).
-3. Run the MRI header sanity check and open one `.vsi` in QuPath to lock the channel map.
-4. Attempt An et al. model inference once → record the M0 decision-gate outcome.
-5. Start Milestone 1A.
+## Immediate next actions
+
+The environment and repository skeleton are now in place. The current audited
+task order, including the IHC tissue-area correction and required provenance,
+is maintained in [`v1_next_session_todo.md`](v1_next_session_todo.md).
+
+Do not start atlas or DL work until that v1 completion gate passes.

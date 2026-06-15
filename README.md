@@ -18,6 +18,9 @@ v1 is deliberately small: one test animal, simplest reliable method per step, **
 
 Atlas registration, DL models, compartments, cell-level detection, and batch processing are later milestones described in `docs/development_roadmap.md`.
 
+For the current audited blockers and the exact next programming-session order,
+read [`docs/v1_next_session_todo.md`](docs/v1_next_session_todo.md).
+
 ## Use your existing conda env
 
 This starter is configured for Paul’s existing environment:
@@ -57,6 +60,11 @@ If you do not yet have an IHC export CSV, the MRI track can still run. If you do
 ## QuPath v1 export
 
 v1 Groovy scripts do **not** assume channel order. Pass the IgG-FITC channel index and threshold after confirming them in the animal YAML/config.
+
+The current exporter is preliminary because it measures the full rectangular
+image, including off-tissue background. Do not treat its positive-area result
+as final until the tissue-ROI and provenance tasks in
+[`docs/v1_next_session_todo.md`](docs/v1_next_session_todo.md) are complete.
 
 Example shape:
 

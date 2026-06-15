@@ -27,6 +27,9 @@ This file is the operational summary. Do not duplicate the full docs into code c
 
 **Phase: v1 development.** Build one test animal, simplest reliable method per step, **no atlas, no DL, no compartments, no batch**.
 
+The current prioritized programming checklist is
+`docs/v1_next_session_todo.md`. Read it before starting the next v1 session.
+
 v1 includes:
 
 - NIfTI load + header/spacing sanity.
@@ -238,9 +241,14 @@ MRI code is done only when:
 IHC code is done only when:
 
 - QuPath export CSV is parsed into tidy long rows.
+- IgG-FITC positive area is measured against a reviewed tissue ROI, not the
+  full rectangular image including off-tissue background.
 - FITC readouts are labeled as IgG-FITC, not direct LYS241 concentration.
 - Channel/threshold facts are config-driven or explicitly passed from config.
 - Missing channel order or threshold produces a helpful error, not a guessed result.
+- Re-running an export does not silently duplicate section measurements.
+- Specificity/overlap interpretation flags and IHC threshold provenance are
+  carried into deliverables or an attached provenance table.
 
 Joined v1 output is done only when one command writes a CSV with at least:
 
@@ -288,6 +296,8 @@ Files under `legacy/context_code/` are reference-only scripts from earlier local
 
 ## 12. TODO facts only Paul can provide
 
+- The prioritized and actionable version of this list is maintained in
+  `docs/v1_next_session_todo.md`.
 - [ ] Exact `.vsi` channel order per panel.
 - [ ] NeuroTrace variant / emission.
 - [ ] anti-IgG-FITC specificity to LYS241 vs generic IgG.

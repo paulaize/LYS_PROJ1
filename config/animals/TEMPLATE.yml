@@ -20,10 +20,11 @@ ihc:
       overview_vsi: null       # TODO: overview image if present
       # EXACT channel index -> marker. ORDER UNCONFIRMED; confirm in QuPath/Bio-Formats.
       channel_map:
-        0: null                # e.g. "DAPI"
-        1: null                # e.g. "NeuroTrace"
-        2: null                # e.g. "Podocalyxin"
-        3: null                # e.g. "IgG-FITC"
+      # 
+        0: "C1 DAPI"              # "DAPI"
+        1: "C2 FITC"              # "IgG-FITC"
+        2: "C3 CY3"               # "NeuroTrace"
+        3: "C4 CY5"               # "Podocalyxin"
       neurotrace_emission: null # TODO: green variant can bleed into FITC
       igg_fitc_channel_index: null       # TODO: integer index after channel confirmation
       igg_fitc_positive_threshold: null  # TODO: tune/confirm; overrides global if set
@@ -35,7 +36,7 @@ ihc:
         1: null                # e.g. "IBA1"
         2: null                # e.g. "GFAP"
         3: null                # e.g. "IgG-FITC"
-      igg_fitc_channel_index: null
+      igg_fitc_channel_index: 1
       igg_fitc_positive_threshold: null
 
 interpretation_flags:

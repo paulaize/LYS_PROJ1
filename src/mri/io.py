@@ -33,7 +33,7 @@ def check_header(img: nib.Nifti1Image,
                  expected_spacing_mm: tuple[float, float, float],
                  tolerance: float = 0.02) -> tuple[float, float, float]:
     """Return the spacing; warn loudly (ValueError) if it deviates beyond tol.
-
+    
     Raising is deliberate: a silently-wrong spacing produces a silently-wrong
     lesion volume. If your data legitimately differs, update expected_spacing_mm
     in config/pipeline.yml rather than relaxing this check.

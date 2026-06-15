@@ -6,7 +6,7 @@ project:
   phase: "v1"
   environment: "lys-bbb"
 
-version: "0.2.0-v1-merged"  # bump on meaningful pipeline changes; written to outputs
+version: "0.2.0-v1-merged"
 
 paths:
   data_root: "data"
@@ -16,39 +16,61 @@ paths:
 mri:
   expected_spacing_mm: [0.07, 0.07, 0.5]
   spacing_tolerance: 0.02
+
   lesion_scan:
     scan_number: 2
     sequence: "T2_haute_resolution_Turbo"
+
   optional_scans:
     t2star_scan_number: 3
     tof_scan_number: 4
+
   n4:
     enabled: true
+
   brain_mask:
-    method: "otsu_morphology"   # v1 fallback; antspynet later
+    method: "otsu_morphology"
+
   segment:
-    method: "threshold"         # v1. Later: "dl".
-    k: 2.5                      # TODO: tune on a fixture (contra_mean + k * contra_sd)
-    min_lesion_mm3: 0.5         # size floor; also suppresses control false positives
+    method: "threshold"
+    k: 2.5
+    min_lesion_mm3: 0.5
+
   edema:
-    method: "swanson"           # indirect / Swanson correction
+    method: "swanson"
+
   edit:
-    editor: "napari"            # external alternatives: itk_snap, slicer, fiji_labkit
-    reviewer: null              # TODO: fill, or USER env var is used
+    editor: "napari"
+    reviewer: "Paul-Andréas"
     require_human_review: true
-  dl:                           # Milestone 2, unused in v1
+
+  dl:
+    enabled: false
     model: "an2023"
     weights_path: null
 
 ihc:
-  qupath_executable: null       # TODO: absolute path to QuPath CLI binary if scripted
+  # /Applications/QuPath.app/Contents/MacOS/QuPath
+  qupath_executable: "/Applications/QuPath-0.7.0-arm64.app/Contents/MacOS/QuPath-0.7.0-arm64"
+
   vsi_pixel_size_um: 0.325
-  # Use IgG-FITC language. This is NOT direct LYS241 concentration unless specificity is proven.
-  igg_fitc_positive_threshold: null   # TODO: tune per acquisition or per panel
   default_downsample: 8.0
+
   dapi_channel_name: "DAPI"
   fitc_marker_name: "IgG-FITC"
   fitc_interpretation: "igg_fitc_signal_not_direct_lys241_concentration"
 
-compartments:                  # Milestone 4, unused in v1
-  peri_ring_mm: null           # TODO later
+  # Keep null until tuned visually/experimentally in QuPath.
+  # Do not use QuPath brightness/contrast max as the analysis threshold.
+  igg_fitc_positive_threshold: null
+
+  default_igg_fitc_channel_index: 1
+
+compartments:
+  # Milestone 4, unused in v1.
+  peri_ring_mm: null
+
+qc:
+  require_human_mask_review: true
+  flag_core_igg_fitc_confounded: true
+  small_24h_lesion_warning_mm3: 6.0
