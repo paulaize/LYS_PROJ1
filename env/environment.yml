@@ -1,0 +1,25 @@
+# Reference environment only. The project is configured to use Paul's existing
+# env `lys-bbb`, not to create a new env by default.
+# To update the existing env with small dev tools, prefer:
+#   conda env update -n lys-bbb -f env/lys-bbb-dev-additions.yml
+name: lys-bbb
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - nibabel
+  - simpleitk
+  - numpy
+  - scipy
+  - scikit-image
+  - pandas
+  - pyyaml
+  - napari
+  - pyqt
+  - pytest
+  - ruff
+  - pip
+  - pip:
+      - brkraw
+      - antspyx
+      - paquo

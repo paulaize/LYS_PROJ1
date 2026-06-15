@@ -1,0 +1,44 @@
+# Per-animal config. Copy to config/animals/<id>.yml and fill every TODO/null.
+# No paths, channel maps, or thresholds should be hardcoded in Python/Groovy.
+
+animal_id: "TEMPLATE"          # e.g. "M07"
+timepoint: null                # one of: 1h, 3h, 6h, 24h, 48h, 5d
+group: "stroke"                # stroke/control/etc.
+
+mri:
+  # MRI exists ONLY for 24h / 48h / 5d animals. For 1h/3h/6h set has_mri: false.
+  has_mri: true
+  t2_nifti: null               # TODO: T2 RARE Scan 2 NIfTI from brkraw
+  t2star_nifti: null           # optional Scan 3 T2*
+  tof_nifti: null              # optional Scan 4 TOF
+  lesion_side: null            # "L"/"R"/null; null => segmenter infers from hyperintensity
+
+ihc:
+  panels:
+    A:
+      vsi_dir: null            # TODO: folder of 8 section .vsi files
+      overview_vsi: null       # TODO: overview image if present
+      # EXACT channel index -> marker. ORDER UNCONFIRMED; confirm in QuPath/Bio-Formats.
+      channel_map:
+        0: null                # e.g. "DAPI"
+        1: null                # e.g. "NeuroTrace"
+        2: null                # e.g. "Podocalyxin"
+        3: null                # e.g. "IgG-FITC"
+      neurotrace_emission: null # TODO: green variant can bleed into FITC
+      igg_fitc_channel_index: null       # TODO: integer index after channel confirmation
+      igg_fitc_positive_threshold: null  # TODO: tune/confirm; overrides global if set
+    B:
+      vsi_dir: null
+      overview_vsi: null
+      channel_map:
+        0: null                # e.g. "DAPI"
+        1: null                # e.g. "IBA1"
+        2: null                # e.g. "GFAP"
+        3: null                # e.g. "IgG-FITC"
+      igg_fitc_channel_index: null
+      igg_fitc_positive_threshold: null
+
+interpretation_flags:
+  anti_igg_specificity_resolved: false
+  fitc_specific_to_lys241: null # true/false/null. Null means interpretation unresolved.
+  fitc_overlap_risk: null       # e.g. "unknown", "green_neurotrace_overlap", "low"

@@ -1,0 +1,54 @@
+# Data / outputs — read-only inputs and generated files (see AGENTS.md §4)
+data/
+work/
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.so
+
+# Jupyter / notebook scratch
+.ipynb_checkpoints/
+*.ipynb
+
+# Environments
+.env
+.venv
+venv/
+*.egg
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# QuPath projects and large binaries
+*.qpproj
+*.tif
+*.tiff
+*.vsi
+*.nii
+*.nii.gz
+*.h5
+*.hdf5
+
+# Model weights
+*.pt
+*.pth
+*.onnx
+*.pkl

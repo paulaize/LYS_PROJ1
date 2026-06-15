@@ -1,0 +1,14 @@
+# Optional dev additions for the EXISTING lys-bbb env.
+# Apply with:
+#   conda env update -n lys-bbb -f env/lys-bbb-dev-additions.yml
+name: lys-bbb
+channels:
+  - conda-forge
+dependencies:
+  - pytest
+  - ruff
+  - pytest-cov
+  - pip
+  - pip:
+      # Optional; only needed if you orchestrate QuPath projects from Python.
+      - paquo
