@@ -53,8 +53,10 @@ def _threshold_backend(volume, brain_mask, *, k, min_lesion_mm3, spacing_mm, les
     # with a symmetry-plane fit or the atlas midline (Milestone 3).
     nx = vol.shape[0]
     mid = nx // 2
-    left = np.zeros_like(brain); left[:mid] = brain[:mid]
-    right = np.zeros_like(brain); right[mid:] = brain[mid:]
+    left = np.zeros_like(brain)
+    left[:mid] = brain[:mid]
+    right = np.zeros_like(brain)
+    right[mid:] = brain[mid:]
 
     # Decide ipsi (lesion) vs contra (reference) hemisphere.
     if lesion_side in ("L", "left"):

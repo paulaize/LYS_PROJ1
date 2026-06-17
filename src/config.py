@@ -63,6 +63,23 @@ class Config:
         return self.resolve_input_path(p) if p else None
 
     @property
+    def bruker_study(self) -> Path | None:
+        p = self.animal.get("mri", {}).get("bruker_study")
+        return self.resolve_input_path(p) if p else None
+
+    @property
+    def t2_scan_id(self) -> int:
+        value = self.animal.get("mri", {}).get("t2_scan_id")
+        if value is None:
+            value = self.pipeline.get("mri", {}).get("lesion_scan", {}).get("scan_number", 2)
+        return int(value)
+
+    @property
+    def t2_reco_id(self) -> int:
+        value = self.animal.get("mri", {}).get("t2_reco_id", 1)
+        return int(value)
+
+    @property
     def expected_spacing_mm(self) -> tuple[float, float, float]:
         s = self.pipeline.get("mri", {}).get("expected_spacing_mm", [0.07, 0.07, 0.5])
         return (float(s[0]), float(s[1]), float(s[2]))
@@ -162,7 +179,9 @@ def load_config(
     animal_path = Path(animal_config)
     if not animal_path.is_absolute():
         animal_path = repo_root / animal_path
-    pipeline_path = Path(pipeline_config) if pipeline_config else repo_root / "config" / "pipeline.yml"
+    pipeline_path = (
+        Path(pipeline_config) if pipeline_config else repo_root / "config" / "pipeline.yml"
+    )
     if not pipeline_path.is_absolute():
         pipeline_path = repo_root / pipeline_path
 

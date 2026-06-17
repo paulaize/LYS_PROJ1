@@ -51,11 +51,16 @@ make test
 cp config/animals/TEMPLATE.yml config/animals/M07.yml
 # Fill every TODO: paths, timepoint, channel map, thresholds, reviewer.
 
-# 4. Optional: run MRI + ingest an existing IHC export
-make run CONFIG=config/animals/M07.yml IHC=work/M07/ihc_A.csv
+# 4. Convert configured Bruker T2 scan 2 to NIfTI under work/
+make convert-mri CONFIG=config/animals/M07.yml
+
+# 5. Optional: run MRI + ingest an existing IHC export
+make run CONFIG=config/animals/M07.yml RUN_ARGS=--no-mask-editor IHC=work/M07/ihc_A.csv
 ```
 
 If you do not yet have an IHC export CSV, the MRI track can still run. If you do not yet have MRI for an early timepoint, set `mri.has_mri: false` in that animal config.
+`RUN_ARGS=--no-mask-editor` is for a first technical run only; it writes the
+draft mask as `needs_human_review` instead of opening napari.
 
 ## QuPath v1 export
 

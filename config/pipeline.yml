@@ -64,7 +64,7 @@ ihc:
   # Do not use QuPath brightness/contrast max as the analysis threshold.
   igg_fitc_positive_threshold: null
 
-  default_igg_fitc_channel_index: 1
+  default_igg_fitc_channel_index: null
 
 compartments:
   # Milestone 4, unused in v1.

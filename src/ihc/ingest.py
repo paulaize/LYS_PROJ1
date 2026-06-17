@@ -37,7 +37,11 @@ def ingest_qupath(csv_path: str | Path) -> list[dict]:
     missing = EXPECTED_COLUMNS - set(df.columns)
     if missing:
         legacy = {"fitc_pos_area_um2"} <= set(df.columns)
-        hint = " Legacy FITC column found; rename/export as igg_fitc_pos_area_um2." if legacy else ""
+        hint = (
+            " Legacy FITC column found; rename/export as igg_fitc_pos_area_um2."
+            if legacy
+            else ""
+        )
         raise ValueError(
             f"QuPath export {csv_path.name} missing columns {sorted(missing)}.{hint} "
             "Check export_measurements.groovy is in sync with EXPECTED_COLUMNS."

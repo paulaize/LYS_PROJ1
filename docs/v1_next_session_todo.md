@@ -1,6 +1,6 @@
 # v1 next-session TODO
 
-Last audited: 2026-06-15
+Last audited: 2026-06-17
 
 This is the current execution checklist for the next programming session. It
 overrides the older "Immediate next actions" at the end of
@@ -12,21 +12,33 @@ no compartments, and no batch processing.
 - [x] Existing `lys-bbb` environment is usable on macOS arm64.
 - [x] Required and optional Python imports pass.
 - [x] QuPath 0.7.0, brkraw, and napari command-line checks pass.
-- [x] `make test` passes: 14 tests.
+- [x] `make test` passes: 19 tests.
 - [x] MRI and IHC-ingest unit tests use synthetic data and pass.
-- [ ] `make lint` passes. The latest audit found 13 lint errors.
-- [ ] Git working tree is reviewed and clean. Recheck before editing; the latest
-  audit found existing uncommitted changes.
-- [ ] One real v1 animal has completed the full MRI + IHC path.
+- [x] `make lint` passes.
+- [x] One real v1 animal is configured: `BD_08_5D`.
+- [x] Bruker Scan 2 / reco 1 T2 RARE was converted to
+  `work/BD_08_5D/mri/t2_scan2.nii.gz`.
+- [x] Converted T2 header spacing validates as `0.07 x 0.07 x 0.5 mm`.
+- [x] First no-editor MRI technical run wrote draft/corrected masks and
+  `outputs/BD_08_5D/BD_08_5D_v1.csv`; QC is correctly flagged
+  `needs_human_review`.
+- [ ] Git working tree is reviewed and clean. Recheck before editing; the
+  current setup changes are intentionally uncommitted.
+- [ ] One real v1 animal has completed the full reviewed MRI + IHC path.
 
 ## Facts Paul must provide
 
 Do not guess these values in code or config.
 
-- [ ] Choose the one v1 test animal. Prefer a 24h, 48h, or 5d animal with MRI
-  and both IHC panels.
-- [ ] Record the T2 RARE Scan 2 NIfTI path and confirm the brkraw output name.
-- [ ] Record the `.vsi` paths for every Panel A and Panel B section.
+- [x] Choose the one v1 test animal: `BD_08_5D` (`5d`, stroke), with MRI and
+  Panel A/B IHC data present.
+- [x] Record the T2 RARE Scan 2 NIfTI path and confirm the brkraw output name:
+  `work/BD_08_5D/mri/t2_scan2.nii.gz`.
+- [x] Record the available top-level `.vsi` paths for Panel A and Panel B in
+  `config/animals/BD_08_5D.yml`.
+- [ ] Confirm how QuPath/Bio-Formats exposes the 8 sections/series inside each
+  `.vsi`, and whether the v1 export should run once per top-level file or once
+  per series/section.
 - [ ] Confirm the exact zero-based channel map and IgG-FITC channel index for
   each panel in QuPath/Bio-Formats.
 - [ ] Identify the NeuroTrace product/catalog number and emission. Record
@@ -46,12 +58,12 @@ Complete these in order.
 
 ### P0: remove guessed configuration
 
-- [ ] Restore unresolved channel maps and channel indexes in
+- [x] Restore unresolved channel maps and channel indexes in
   `config/animals/TEMPLATE.yml` to `null`.
-- [ ] Remove the unconfirmed global `default_igg_fitc_channel_index` from
+- [x] Remove the unconfirmed global `default_igg_fitc_channel_index` from
   `config/pipeline.yml`, or keep it `null` and fail helpfully when unset.
-- [ ] Keep global IgG-FITC threshold `null` until it has been approved.
-- [ ] Add validation tests proving unresolved channel indexes and thresholds
+- [x] Keep global IgG-FITC threshold `null` until it has been approved.
+- [x] Add validation tests proving unresolved channel indexes and thresholds
   cannot silently run.
 
 ### P0: make the v1 IHC export scientifically usable
@@ -60,6 +72,8 @@ The current exporter is preliminary: it counts the full rectangular image,
 including off-tissue background. The annotation created by
 `detect_cells.groovy` is not used by the exporter.
 
+- [ ] Confirm whether the configured Panel A/B `.vsi` files contain all
+  section series and decide the exact QuPath export iteration unit.
 - [ ] Standardize a manually reviewed whole-tissue annotation for v1. Do not
   invent an automatic tissue threshold.
 - [ ] Update `export_measurements.groovy` to require and measure only the
@@ -90,17 +104,27 @@ including off-tissue background. The annotation created by
 
 ### P1: validate the MRI path on the real test animal
 
-- [ ] Create `config/animals/<id>.yml` from the cleaned template.
-- [ ] Confirm header spacing is `0.07 x 0.07 x 0.5 mm`.
+- [x] Create `config/animals/BD_08_5D.yml` from the cleaned template.
+- [x] Add a configured Bruker-to-NIfTI conversion command:
+  `make convert-mri CONFIG=config/animals/BD_08_5D.yml`.
+- [x] Confirm header spacing is `0.07 x 0.07 x 0.5 mm`.
+- [x] Run a first no-editor technical MRI pass:
+  `make run CONFIG=config/animals/BD_08_5D.yml RUN_ARGS=--no-mask-editor`.
 - [ ] Visually inspect the N4-corrected volume and generated brain mask.
+- [ ] Review/edit `work/BD_08_5D/lesion_corrected.nii.gz` with the chosen mask
+  editor; replace the technical fallback with a documented human-corrected
+  mask.
 - [ ] Run candidate `k` values against the reference human lesion mask.
 - [ ] Select and record the approved `k`; preserve the corrected human mask.
-- [ ] Confirm raw and Swanson-corrected lesion volumes are plausible.
-- [ ] Confirm the final MRI rows carry reviewer, edit Dice, and QC status.
+- [ ] Confirm raw and Swanson-corrected lesion volumes are plausible. The
+  technical run produced raw `6.468 mm3` and Swanson-corrected `6.637 mm3`, but
+  these are not final until mask review.
+- [x] Confirm technical MRI rows carry reviewer, edit Dice, and QC status.
+- [ ] Confirm reviewed final MRI rows carry reviewer, edit Dice, and QC status.
 
 ### P1: repository cleanup
 
-- [ ] Fix current Ruff errors and trailing whitespace without unrelated
+- [x] Fix current Ruff errors and trailing whitespace without unrelated
   refactors.
 - [ ] Reconcile the README with the actual repository layout; `.codex/` is
   currently described but was absent at the latest audit.
@@ -114,8 +138,11 @@ including off-tissue background. The annotation created by
 After every code change:
 
 ```bash
-conda run -n lys-bbb python -m pytest -q
+make test
 ```
+
+`make test` disables external pytest plugin autoloading; direct pytest currently
+tries to import napari's pytest plugin in this environment.
 
 Before calling v1 complete:
 
@@ -123,15 +150,16 @@ Before calling v1 complete:
 make env-check
 make test
 make lint
-make run CONFIG=config/animals/<id>.yml IHC=work/<id>/ihc.csv
+make convert-mri CONFIG=config/animals/BD_08_5D.yml
+make run CONFIG=config/animals/BD_08_5D.yml IHC=work/BD_08_5D/ihc.csv
 ```
 
 Inspect manually:
 
-- `work/<id>/lesion_draft.nii.gz`
-- `work/<id>/lesion_corrected.nii.gz`
+- `work/BD_08_5D/lesion_draft.nii.gz`
+- `work/BD_08_5D/lesion_corrected.nii.gz`
 - revised tissue-only QuPath measurements
-- `outputs/<id>/<id>_v1.csv`
+- `outputs/BD_08_5D/BD_08_5D_v1.csv`
 
 ## v1 completion gate
 

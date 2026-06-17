@@ -1,0 +1,52 @@
+# v1 real test animal config.
+# Keep unknown scientific facts null until Paul confirms them in QuPath/QC.
+
+animal_id: "BD_08_5D"
+timepoint: "5d"
+group: "stroke"
+
+source_ids:
+  mri_subject: "JD_BD_08_2_D5"
+
+mri:
+  has_mri: true
+  bruker_study: "data/5D/MRI/20251123_175503_JD_BD_08_2_D5_MRI_D5"
+  t2_scan_id: 2
+  t2_reco_id: 1
+  t2_nifti: "work/BD_08_5D/mri/t2_scan2.nii.gz"
+  t2star_nifti: null
+  tof_nifti: null
+  lesion_side: null
+
+ihc:
+  panels:
+    A:
+      vsi_dir: "data/5D/IHC/panel_A"
+      vsi_files:
+        - "data/5D/IHC/panel_A/BD_08_5D Podo NeuroT IgG___01.vsi"
+      overview_vsi: null
+      channel_map:
+        0: null
+        1: null
+        2: null
+        3: null
+      neurotrace_emission: null
+      igg_fitc_channel_index: null
+      igg_fitc_positive_threshold: null
+    B:
+      vsi_dir: "data/5D/IHC/panel_B"
+      vsi_files:
+        - "data/5D/IHC/panel_B/BD_08_5D IBA1 GFAP IgG_01.vsi"
+      overview_vsi: null
+      channel_map:
+        0: null
+        1: null
+        2: null
+        3: null
+      igg_fitc_channel_index: null
+      igg_fitc_positive_threshold: null
+
+interpretation_flags:
+  anti_igg_specificity_resolved: false
+  fitc_specific_to_lys241: null
+  fitc_overlap_risk: null

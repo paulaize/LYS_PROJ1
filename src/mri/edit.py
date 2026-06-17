@@ -40,6 +40,7 @@ def review_mask(
     *,
     reference_img=None,
     reviewer: str | None = None,
+    allow_gui: bool = True,
 ) -> dict:
     """Open napari to edit draft_mask over volume; save corrected mask to out_path.
 
@@ -49,6 +50,16 @@ def review_mask(
     """
     reviewer = reviewer or os.environ.get("USER", "unknown")
     out_path = Path(out_path)
+
+    if not allow_gui:
+        _save(draft_mask, reference_img, out_path)
+        return {
+            "edited": False,
+            "dice": 1.0,
+            "reviewer": reviewer,
+            "qc_flag": "needs_human_review",
+            "note": "mask editor skipped; draft saved unedited - REVIEW NOT DONE",
+        }
 
     try:
         import napari  # imported lazily; GUI only

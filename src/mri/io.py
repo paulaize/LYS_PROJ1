@@ -39,7 +39,7 @@ def check_header(img: nib.Nifti1Image,
     in config/pipeline.yml rather than relaxing this check.
     """
     spacing = get_spacing(img)
-    diffs = [abs(a - b) for a, b in zip(spacing, expected_spacing_mm)]
+    diffs = [abs(a - b) for a, b in zip(spacing, expected_spacing_mm, strict=True)]
     if any(d > tolerance for d in diffs):
         raise ValueError(
             f"Voxel spacing {spacing} mm deviates from expected "

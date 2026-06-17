@@ -23,8 +23,10 @@ from .volume import mask_volume_mm3
 def _hemispheres(brain_mask: np.ndarray):
     nx = brain_mask.shape[0]
     mid = nx // 2
-    left = np.zeros_like(brain_mask, dtype=bool); left[:mid] = brain_mask[:mid] > 0
-    right = np.zeros_like(brain_mask, dtype=bool); right[mid:] = brain_mask[mid:] > 0
+    left = np.zeros_like(brain_mask, dtype=bool)
+    left[:mid] = brain_mask[:mid] > 0
+    right = np.zeros_like(brain_mask, dtype=bool)
+    right[mid:] = brain_mask[mid:] > 0
     return left, right
 
 

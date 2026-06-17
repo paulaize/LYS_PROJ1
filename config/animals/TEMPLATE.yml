@@ -8,6 +8,9 @@ group: "stroke"                # stroke/control/etc.
 mri:
   # MRI exists ONLY for 24h / 48h / 5d animals. For 1h/3h/6h set has_mri: false.
   has_mri: true
+  bruker_study: null            # TODO: raw Bruker study folder, read-only under data/ or /Volumes
+  t2_scan_id: 2                 # T2 RARE Scan 2; change only if metadata proves otherwise
+  t2_reco_id: 1                 # MAGNITUDE_IMAGE reco
   t2_nifti: null               # TODO: T2 RARE Scan 2 NIfTI from brkraw
   t2star_nifti: null           # optional Scan 3 T2*
   tof_nifti: null              # optional Scan 4 TOF
@@ -17,26 +20,27 @@ ihc:
   panels:
     A:
       vsi_dir: null            # TODO: folder of 8 section .vsi files
+      vsi_files: []            # TODO: explicit .vsi paths to process
       overview_vsi: null       # TODO: overview image if present
       # EXACT channel index -> marker. ORDER UNCONFIRMED; confirm in QuPath/Bio-Formats.
       channel_map:
-      # 
-        0: "C1 DAPI"              # "DAPI"
-        1: "C2 FITC"              # "IgG-FITC"
-        2: "C3 CY3"               # "NeuroTrace"
-        3: "C4 CY5"               # "Podocalyxin"
-      neurotrace_emission: null # TODO: green variant can bleed into FITC
-      igg_fitc_channel_index: null       # TODO: integer index after channel confirmation
+        0: null                # e.g. "DAPI"
+        1: null                # e.g. "IgG-FITC"
+        2: null                # e.g. "NeuroTrace"
+        3: null                # e.g. "Podocalyxin"
+      neurotrace_emission: null
+      igg_fitc_channel_index: null
       igg_fitc_positive_threshold: null  # TODO: tune/confirm; overrides global if set
     B:
       vsi_dir: null
+      vsi_files: []
       overview_vsi: null
       channel_map:
         0: null                # e.g. "DAPI"
         1: null                # e.g. "IBA1"
         2: null                # e.g. "GFAP"
         3: null                # e.g. "IgG-FITC"
-      igg_fitc_channel_index: 1
+      igg_fitc_channel_index: null
       igg_fitc_positive_threshold: null
 
 interpretation_flags:

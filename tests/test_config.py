@@ -31,3 +31,36 @@ def test_panel_channel_requires_confirmed_igg_fitc_index():
     cfg = load_config("config/animals/TEMPLATE.yml", repo_root=REPO)
     with pytest.raises(ValueError):
         cfg.panel_igg_fitc_channel_index("A")
+
+
+def test_all_template_panel_channels_require_confirmed_igg_fitc_index():
+    cfg = load_config("config/animals/TEMPLATE.yml", repo_root=REPO)
+    for panel in ("A", "B"):
+        with pytest.raises(ValueError, match="igg_fitc_channel_index is unset"):
+            cfg.panel_igg_fitc_channel_index(panel)
+
+
+def test_template_panel_thresholds_require_approved_value():
+    cfg = load_config("config/animals/TEMPLATE.yml", repo_root=REPO)
+    for panel in ("A", "B"):
+        with pytest.raises(ValueError, match="IgG-FITC positive threshold is unset"):
+            cfg.panel_igg_fitc_threshold(panel)
+
+
+def test_real_v1_animal_config_records_raw_and_derived_mri_paths():
+    cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
+    assert cfg.animal_id == "BD_08_5D"
+    assert cfg.timepoint == "5d"
+    assert cfg.bruker_study == REPO / "data/5D/MRI/20251123_175503_JD_BD_08_2_D5_MRI_D5"
+    assert cfg.t2_scan_id == 2
+    assert cfg.t2_reco_id == 1
+    assert cfg.t2_nifti == REPO / "work/BD_08_5D/mri/t2_scan2.nii.gz"
+
+
+def test_real_v1_animal_does_not_guess_ihc_channels_or_thresholds():
+    cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
+    for panel in ("A", "B"):
+        with pytest.raises(ValueError):
+            cfg.panel_igg_fitc_channel_index(panel)
+        with pytest.raises(ValueError):
+            cfg.panel_igg_fitc_threshold(panel)

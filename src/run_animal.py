@@ -17,13 +17,14 @@ from pathlib import Path
 from .config import load_config
 
 
-def run_mri(cfg) -> dict | None:
+def run_mri(cfg, *, allow_mask_editor: bool = True) -> dict | None:
     """Return MRI results, or None if this animal has no MRI."""
     if not cfg.has_mri:
         print(f"[{cfg.animal_id}] no MRI (early timepoint) — skipping MRI track.")
         return None
 
-    from .mri import edema, io as mri_io, preprocess, segment
+    from .mri import edema, preprocess, segment
+    from .mri import io as mri_io
     from .mri.edit import review_mask
     from .mri.volume import mask_volume_mm3, per_slice_area_mm2
 
@@ -60,6 +61,7 @@ def run_mri(cfg) -> dict | None:
         work / "lesion_corrected.nii.gz",
         reference_img=img,
         reviewer=cfg.reviewer,
+        allow_gui=allow_mask_editor,
     )
     corrected_path = work / "lesion_corrected.nii.gz"
     corrected = (
@@ -186,12 +188,21 @@ def write_minimal_table(cfg, mri: dict | None, ihc_rows: list[dict]) -> Path:
 def main():
     ap = argparse.ArgumentParser(description="Run one animal through the v1 pipeline.")
     ap.add_argument("--config", required=True, help="config/animals/<id>.yml")
-    ap.add_argument("--pipeline", default=None, help="config/pipeline.yml (default: alongside repo)")
+    ap.add_argument(
+        "--pipeline",
+        default=None,
+        help="config/pipeline.yml (default: alongside repo)",
+    )
     ap.add_argument("--ihc-csv", default=None, help="QuPath measurement export CSV (optional)")
+    ap.add_argument(
+        "--no-mask-editor",
+        action="store_true",
+        help="save the draft mask as needs_human_review instead of opening napari",
+    )
     args = ap.parse_args()
 
     cfg = load_config(args.config, args.pipeline)
-    mri = run_mri(cfg)
+    mri = run_mri(cfg, allow_mask_editor=not args.no_mask_editor)
     ihc_rows = run_ihc(cfg, Path(args.ihc_csv) if args.ihc_csv else None)
     write_minimal_table(cfg, mri, ihc_rows)
 

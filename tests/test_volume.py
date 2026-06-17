@@ -4,11 +4,11 @@ These intentionally avoid heavy imaging deps (nibabel/SimpleITK/napari) so they
 run in any environment, including CI and Codex sandboxes.
 """
 import numpy as np
+import pytest
 
-from src.mri.volume import voxel_volume_mm3, mask_volume_mm3, per_slice_area_mm2
-from src.mri.edit import dice
+from src.mri.edit import dice, review_mask
 from src.mri.segment import segment_lesion
-
+from src.mri.volume import mask_volume_mm3, per_slice_area_mm2, voxel_volume_mm3
 
 SPACING = (0.07, 0.07, 0.5)  # anisotropic — the whole point
 
@@ -50,10 +50,31 @@ def test_dice_identity_and_empty():
 
 
 def test_dice_partial_overlap():
-    a = np.zeros((4, 4, 4), dtype=bool); a[0:2, :, :] = True
-    b = np.zeros((4, 4, 4), dtype=bool); b[1:3, :, :] = True
+    a = np.zeros((4, 4, 4), dtype=bool)
+    a[0:2, :, :] = True
+    b = np.zeros((4, 4, 4), dtype=bool)
+    b[1:3, :, :] = True
     # |A|=|B|=32, overlap=16 -> 2*16/64 = 0.5
     assert abs(dice(a, b) - 0.5) < 1e-9
+
+
+def test_review_mask_can_skip_gui_for_technical_run(tmp_path):
+    vol = np.zeros((4, 4, 4), dtype=np.float32)
+    draft = np.zeros((4, 4, 4), dtype=bool)
+    draft[1:3, 1:3, 1:3] = True
+
+    meta = review_mask(
+        vol,
+        draft,
+        tmp_path / "lesion_corrected.npy",
+        reviewer="tester",
+        allow_gui=False,
+    )
+
+    assert meta["qc_flag"] == "needs_human_review"
+    assert meta["edited"] is False
+    assert meta["dice"] == 1.0
+    assert (tmp_path / "lesion_corrected.npy").exists()
 
 
 def test_threshold_segmenter_finds_hyperintensity():
@@ -71,8 +92,5 @@ def test_threshold_segmenter_finds_hyperintensity():
 def test_dl_backend_not_implemented():
     vol = np.zeros((4, 4, 4), dtype=np.float32)
     brain = np.ones((4, 4, 4), dtype=bool)
-    try:
+    with pytest.raises(NotImplementedError):
         segment_lesion(vol, brain, method="dl")
-        assert False, "expected NotImplementedError"
-    except NotImplementedError:
-        pass

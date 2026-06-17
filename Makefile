@@ -1,21 +1,26 @@
 ENV ?= lys-bbb
 CONFIG ?= config/animals/TEMPLATE.yml
 IHC ?=
+RUN_ARGS ?=
 
-.PHONY: env-check test lint run clean
+.PHONY: env-check test lint convert-mri run clean
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
 
 test:
-	conda run -n $(ENV) python -m pytest -q
+	PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 conda run -n $(ENV) python -m pytest -q
 
 lint:
 	conda run -n $(ENV) ruff check .
 
-# Run one animal: make run CONFIG=config/animals/M07.yml [IHC=work/M07/ihc_A.csv]
+convert-mri:
+	conda run -n $(ENV) python scripts/convert_bruker_t2.py --config $(CONFIG)
+
+# Run one animal:
+#   make run CONFIG=config/animals/M07.yml RUN_ARGS=--no-mask-editor [IHC=work/M07/ihc_A.csv]
 run:
-	conda run -n $(ENV) python -m src.run_animal --config $(CONFIG) $(if $(IHC),--ihc-csv $(IHC),)
+	conda run -n $(ENV) python -m src.run_animal --config $(CONFIG) $(if $(IHC),--ihc-csv $(IHC),) $(RUN_ARGS)
 
 clean:
 	rm -rf work/* outputs/* .pytest_cache .ruff_cache
