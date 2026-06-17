@@ -19,6 +19,7 @@ no compartments, and no batch processing.
 - [x] Bruker Scan 2 / reco 1 T2 RARE was converted to
   `work/BD_08_5D/mri/t2_scan2.nii.gz`.
 - [x] Converted T2 header spacing validates as `0.07 x 0.07 x 0.5 mm`.
+- [x] v1 MRI lesion side is explicit in config as `lesion_side: image_right`.
 - [x] First no-editor MRI technical run wrote draft/corrected masks and
   `outputs/BD_08_5D/BD_08_5D_v1.csv`; QC is correctly flagged
   `needs_human_review`.
@@ -52,6 +53,10 @@ Do not guess these values in code or config.
   than endogenous mouse IgG, but the actual secondary reagent must be confirmed.
 - [ ] Tune and approve the IgG-FITC positive threshold for each panel or
   acquisition batch using negative and positive controls.
+- [x] Record the v1 lesion side convention: lesion is expected on image-right
+  in the MRI viewer. For the current Bruker T2 NIfTI orientation this maps to
+  the higher-index half of array axis 0 as displayed in Fiji and is encoded as
+  `image_right`.
 - [ ] Draw/review a reference MRI lesion mask and tune MRI threshold `k`.
   `k: 2.5` may be used only as a provisional first technical run.
 - [x] Confirm napari as the initial v1 MRI mask editor. Keep the interface open
@@ -119,6 +124,8 @@ including off-tissue background. The annotation created by
 - [x] Add a configured Bruker-to-NIfTI conversion command:
   `make convert-mri CONFIG=config/animals/BD_08_5D.yml`.
 - [x] Confirm header spacing is `0.07 x 0.07 x 0.5 mm`.
+- [x] Configure segmentation to use the known image-right lesion side instead
+  of inferring side from hyperintensity.
 - [x] Run a first no-editor technical MRI pass:
   `make run CONFIG=config/animals/BD_08_5D.yml RUN_ARGS=--no-mask-editor`.
 - [ ] Visually inspect the N4-corrected volume and generated brain mask.

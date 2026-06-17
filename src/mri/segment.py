@@ -9,6 +9,8 @@ from __future__ import annotations
 import numpy as np
 from scipy import ndimage as ndi
 
+from .sides import ipsi_contra_masks
+
 
 def segment_lesion(volume: np.ndarray,
                    brain_mask: np.ndarray,
@@ -26,7 +28,7 @@ def segment_lesion(volume: np.ndarray,
     method : "threshold" (v1) or "dl" (v2, NotImplementedError until Milestone 2).
     k : threshold = contra_mean + k * contra_sd.
     min_lesion_mm3 : drop connected components smaller than this (needs spacing_mm).
-    lesion_side : "L"/"R"/None. None => infer from hyperintensity.
+    lesion_side : "image_right"/"image_left"/None. None => infer from hyperintensity.
     """
     if method == "threshold":
         return _threshold_backend(
@@ -47,27 +49,7 @@ def _threshold_backend(volume, brain_mask, *, k, min_lesion_mm3, spacing_mm, les
     vol = np.asarray(volume, dtype=np.float32)
     brain = np.asarray(brain_mask, dtype=bool)
 
-    # Split into left/right hemispheres along the x axis (axis 0 of the array as
-    # loaded by nibabel is the first spatial axis). NOTE: this assumes the volume
-    # is roughly midline-centered along axis 0. TODO: replace the naive midline
-    # with a symmetry-plane fit or the atlas midline (Milestone 3).
-    nx = vol.shape[0]
-    mid = nx // 2
-    left = np.zeros_like(brain)
-    left[:mid] = brain[:mid]
-    right = np.zeros_like(brain)
-    right[mid:] = brain[mid:]
-
-    # Decide ipsi (lesion) vs contra (reference) hemisphere.
-    if lesion_side in ("L", "left"):
-        ipsi, contra = left, right
-    elif lesion_side in ("R", "right"):
-        ipsi, contra = right, left
-    else:
-        # infer: lesion side has higher mean T2 (hyperintense edema)
-        lmean = vol[left].mean() if left.any() else -np.inf
-        rmean = vol[right].mean() if right.any() else -np.inf
-        ipsi, contra = (left, right) if lmean >= rmean else (right, left)
+    ipsi, contra = ipsi_contra_masks(brain, lesion_side, vol)
 
     if not contra.any():
         raise ValueError("Empty contralateral hemisphere — check the brain mask / midline.")

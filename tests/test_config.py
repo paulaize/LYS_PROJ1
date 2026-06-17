@@ -55,6 +55,7 @@ def test_real_v1_animal_config_records_raw_and_derived_mri_paths():
     assert cfg.t2_scan_id == 2
     assert cfg.t2_reco_id == 1
     assert cfg.t2_nifti == REPO / "work/BD_08_5D/mri/t2_scan2.nii.gz"
+    assert cfg.animal["mri"]["lesion_side"] == "image_right"
 
 
 def test_real_v1_animal_has_confirmed_ihc_channels_but_unset_thresholds():

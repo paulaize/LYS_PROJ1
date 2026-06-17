@@ -6,6 +6,7 @@ run in any environment, including CI and Codex sandboxes.
 import numpy as np
 import pytest
 
+from src.mri.edema import swanson_corrected_volume
 from src.mri.edit import dice, review_mask
 from src.mri.segment import segment_lesion
 from src.mri.volume import mask_volume_mm3, per_slice_area_mm2, voxel_volume_mm3
@@ -77,16 +78,50 @@ def test_review_mask_can_skip_gui_for_technical_run(tmp_path):
     assert (tmp_path / "lesion_corrected.npy").exists()
 
 
-def test_threshold_segmenter_finds_hyperintensity():
-    # synthetic brain: uniform background, a bright blob in the right hemisphere
+def test_threshold_segmenter_uses_configured_image_right_side():
+    # v1 image-right is the higher-index half of axis 0 as displayed in Fiji.
     vol = np.full((20, 20, 6), 100.0, dtype=np.float32)
     brain = np.ones((20, 20, 6), dtype=bool)
-    vol[12:16, 8:12, 2:4] = 400.0  # bright lesion on the right (x>=10)
-    mask = segment_lesion(vol, brain, method="threshold", spacing_mm=SPACING,
-                          k=2.0, min_lesion_mm3=0.0)
+    vol[12:16, 8:12, 2:4] = 400.0
+    mask = segment_lesion(
+        vol,
+        brain,
+        method="threshold",
+        spacing_mm=SPACING,
+        k=2.0,
+        min_lesion_mm3=0.0,
+        lesion_side="image_right",
+    )
     assert mask.any()
-    # detected voxels should sit on the bright blob's hemisphere
     assert mask[12:16, 8:12, 2:4].sum() > 0
+    assert mask[:10].sum() == 0
+
+
+def test_threshold_segmenter_rejects_unknown_lesion_side():
+    vol = np.full((20, 20, 6), 100.0, dtype=np.float32)
+    brain = np.ones((20, 20, 6), dtype=bool)
+    with pytest.raises(ValueError, match="Unknown lesion_side"):
+        segment_lesion(
+            vol,
+            brain,
+            method="threshold",
+            spacing_mm=SPACING,
+            lesion_side="maybe_right",
+        )
+
+
+def test_swanson_correction_uses_configured_image_right_side():
+    brain = np.zeros((4, 4, 2), dtype=bool)
+    brain[2:, :, :] = True
+    brain[:2, :2, :] = True
+    lesion = np.zeros_like(brain)
+    lesion[3, 0, 0] = True
+
+    result = swanson_corrected_volume(lesion, brain, SPACING, lesion_side="image_right")
+
+    assert result["v_ipsi_mm3"] == 16 * 0.07 * 0.07 * 0.5
+    assert result["v_contra_mm3"] == 8 * 0.07 * 0.07 * 0.5
+    assert result["swelling_ratio"] == 0.5
 
 
 def test_dl_backend_not_implemented():

@@ -16,7 +16,7 @@ mri:
   t2_nifti: "work/BD_08_5D/mri/t2_scan2.nii.gz"
   t2star_nifti: null
   tof_nifti: null
-  lesion_side: null
+  lesion_side: "image_right"
 
 ihc:
   qupath:

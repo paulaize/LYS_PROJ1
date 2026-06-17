@@ -14,7 +14,7 @@ mri:
   t2_nifti: null               # TODO: T2 RARE Scan 2 NIfTI from brkraw
   t2star_nifti: null           # optional Scan 3 T2*
   tof_nifti: null              # optional Scan 4 TOF
-  lesion_side: null            # "L"/"R"/null; null => segmenter infers from hyperintensity
+  lesion_side: "image_right"   # v1 stroke default: lesion is on image-right in MRI viewer
 
 ihc:
   panels:
