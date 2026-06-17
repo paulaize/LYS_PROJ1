@@ -144,7 +144,10 @@ External apps are not Python packages:
 - The current v1 animal `BD_08_5D` has confirmed panel channel maps in
   `config/animals/BD_08_5D.yml`. Future animals still need their own confirmed
   channel maps. Read channel order from config; never assume `channel 0 = DAPI`.
-- NeuroTrace emission = **TODO**. Green NeuroTrace can overlap FITC.
+- Current v1 Panel A NeuroTrace is accepted as **NeuroTrace 640/660 Deep-Red
+  Fluorescent Nissl Stain** (Paul, 2026-06-17), so Panel A FITC spectral
+  bleed-through is not flagged for v1. Paul may still do a later full
+  fluorochrome audit.
 
 ### FITC / LYS241 confound
 
@@ -174,10 +177,12 @@ Therefore:
 - Carry `anti_igg_specificity_resolved=true`,
   `fitc_specific_to_lys241=true`, `fitc_igg_specificity="anti_human_confirmed"`,
   and source `"confirmed_anti_human_IgG (Paul, 2026-06-17)"` in provenance.
-- Keep spectral bleed-through separate from biological specificity. Panel A has
-  NeuroTrace and must carry `fitc_spectral_bleedthrough` until the NeuroTrace
-  emission/control confirms that it cannot contaminate FITC. Panel B has no
-  NeuroTrace and can carry `fitc_spectral_bleedthrough="none"`.
+- Keep spectral bleed-through separate from biological specificity. For
+  `BD_08_5D` v1, Paul accepted Panel A NeuroTrace as 640/660 deep-red
+  (2026-06-17), so `fitc_spectral_bleedthrough="none"` is allowed for the v1
+  config. Future panels/animals still need this fact recorded rather than
+  assumed. Panel B has no NeuroTrace and can carry
+  `fitc_spectral_bleedthrough="none"`.
 
 ### Registration and compartments
 
@@ -342,8 +347,8 @@ Files under `legacy/context_code/` are reference-only scripts from earlier local
 - [x] Current v1 animal/channel/path facts are recorded for `BD_08_5D` in
   `config/animals/BD_08_5D.yml`. New animals must still provide their own
   config facts.
-- [ ] NeuroTrace variant / emission confirmation. Current working note for
-  `BD_08_5D` Panel A is likely 640/660 deep-red, but it is not yet confirmed.
+- [x] NeuroTrace variant / emission accepted for v1:
+  `NeuroTrace 640/660 Deep-Red Fluorescent Nissl Stain` (Paul, 2026-06-17).
 - [x] anti-IgG-FITC specificity to LYS241 vs generic IgG: resolved as
   anti-human IgG specific to humanized LYS241 (Paul, 2026-06-17).
 - [ ] Péri-lesional ring width in mm, later milestone.

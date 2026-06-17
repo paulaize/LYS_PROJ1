@@ -119,7 +119,7 @@ Because callers depend only on these signatures, the DL upgrade in Milestone 2 c
 | Repo + env | Use repo skeleton above with the existing `lys-bbb` env | `import nibabel, SimpleITK, napari, pandas` all succeed |
 | Pick the test animal | Current v1 uses `BD_08_5D`, a 5d stroke animal with MRI + both IHC panels | Paths recorded in `config/animals/BD_08_5D.yml` |
 | MRI header sanity | Load the T2 NIfTI; verify spacing = 0.07×0.07×0.5 mm, orientation | `io.py` prints correct voxel size; a slice renders |
-| Channel map | Open one `.vsi` in QuPath; confirm channel→marker per panel; note NeuroTrace emission | Written into the animal config; FITC-overlap risk noted |
+| Channel map | Open one `.vsi` in QuPath; confirm channel→marker per panel; record NeuroTrace emission | Written into the animal config; Panel A NeuroTrace accepted as 640/660 deep-red for v1 |
 | Model availability check | Later only: find An et al. 2023 code/weights (GitHub) + Zenodo data; try to run inference once | **Not a v1 blocker.** Runs → DL is viable for v2. Doesn't run easily → keep manual-corrected masks and consider nnU-Net fine-tune later |
 
 **Updated:** anti-IgG specificity is resolved (Paul, 2026-06-17): the secondary

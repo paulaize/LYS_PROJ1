@@ -315,7 +315,9 @@ Stop at the phase where accuracy is "good enough for the biology" — for a 10-a
 ---
 
 ### Open items I need from you to finalize parameters
-1. **NeuroTrace variant / emission** — green or non-green? (Decides Panel A FITC spectral contamination risk.)
+1. **NeuroTrace variant / emission** — accepted for v1 as NeuroTrace 640/660
+   deep-red, so Panel A FITC spectral bleed-through is not flagged for v1. Paul
+   may still do a later full fluorochrome audit.
 2. **Exact channel order** in the `.vsi` per panel for new animals. The current
    `BD_08_5D` channel maps are recorded in its animal YAML.
 3. **IgG-FITC positivity threshold calibration** from configured controls /

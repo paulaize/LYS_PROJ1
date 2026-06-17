@@ -1,31 +1,23 @@
-# v1 real test animal config.
-# Keep unknown scientific facts null until Paul confirms them in QuPath/QC.
+# v1 IHC control animal config.
+# MRI is intentionally absent for now; this animal is used as an IHC threshold
+# control for BD_08_5D.
 
-animal_id: "BD_08_5D"
-timepoint: "5d"
-group: "stroke"
-
-source_ids:
-  mri_subject: "JD_BD_08_2_D5"
+animal_id: "C6S5"
+timepoint: null
+group: "control"
 
 mri:
-  has_mri: true
-  bruker_study: "data/5D/MRI/20251123_175503_JD_BD_08_2_D5_MRI_D5"
-  t2_scan_id: 2
-  t2_reco_id: 1
-  t2_nifti: "work/BD_08_5D/mri/t2_scan2.nii.gz"
+  has_mri: false
+  bruker_study: null
+  t2_scan_id: null
+  t2_reco_id: null
+  t2_nifti: null
   t2star_nifti: null
   tof_nifti: null
-  lesion_side: "image_right"
+  lesion_side: null
 
 ihc:
-  threshold_controls:
-    - animal_id: "C6S5"
-      role: "no_lys241_control"
-      config: "config/animals/C6S5.yml"
-      notes: >
-        Control IHC animal supplied by Paul for first IgG-FITC threshold
-        calibration. MRI is not required for this control in v1.
+  control_role: "no_lys241_control"
   qupath:
     tissue_annotation_name: "tissue_v1"
     combined_csv_mode: "overwrite"
@@ -42,28 +34,18 @@ ihc:
       7: "section_06"
       8: "section_07"
       9: "section_08"
-    slide_row_major_section_ids:
-      - "section_04"
-      - "section_03"
-      - "section_02"
-      - "section_01"
-      - "section_08"
-      - "section_07"
-      - "section_06"
-      - "section_05"
     section_selection_policy: "manual_qc_select_best_sections"
     selected_section_ids: []
     excluded_section_ids: []
     notes: >
-      Each VSI has 10 QuPath/Bio-Formats images: label, whole-slide overview,
-      then 8 separate 10 um brain-section images. Process section series only.
-      Sections can be filtered later for tears/folds before quantification.
-  igg_fitc_threshold_status: "pending_vehicle_control_calibration"
+      Control IHC files follow the same v1 QuPath/Bio-Formats series convention
+      as BD_08_5D: label, whole-slide overview, then 8 section images.
+  igg_fitc_threshold_status: "pending_control_calibration"
   panels:
     A:
-      vsi_dir: "data/5D/IHC/panel_A"
+      vsi_dir: "data/C6S5/IHC/panel_A"
       vsi_files:
-        - "data/5D/IHC/panel_A/BD_08_5D Podo NeuroT IgG___01.vsi"
+        - "data/C6S5/IHC/panel_A/BD_08_C6S5 C-_01.vsi"
       overview_vsi: null
       channel_map:
         0: "DAPI"
@@ -75,6 +57,7 @@ ihc:
         1: "C2 FITC"
         2: "C3 CY3"
         3: "C4 CY5"
+      channel_map_source: "same_panel_acquisition_as_BD_08_5D; verify in QuPath before final sign-off"
       neurotrace_emission: "640/660 Deep-Red Fluorescent Nissl Stain"
       neurotrace_emission_confirmed: true
       neurotrace_emission_source: "accepted_for_v1_by_Paul (2026-06-17)"
@@ -82,9 +65,9 @@ ihc:
       igg_fitc_positive_threshold: null
       fitc_spectral_bleedthrough: "none"
     B:
-      vsi_dir: "data/5D/IHC/panel_B"
+      vsi_dir: "data/C6S5/IHC/panel_B"
       vsi_files:
-        - "data/5D/IHC/panel_B/BD_08_5D IBA1 GFAP IgG_01.vsi"
+        - "data/C6S5/IHC/panel_B/BD_08_C6S5 C- IBA1 GFAP IgG_01.vsi"
       overview_vsi: null
       channel_map:
         0: "DAPI"
@@ -96,6 +79,7 @@ ihc:
         1: "C2 FITC"
         2: "C3 CY3"
         3: "C4 CY5"
+      channel_map_source: "same_panel_acquisition_as_BD_08_5D; verify in QuPath before final sign-off"
       igg_fitc_channel_index: 1
       igg_fitc_positive_threshold: null
       fitc_spectral_bleedthrough: "none"
@@ -106,7 +90,6 @@ interpretation_flags:
   specificity_source: "confirmed_anti_human_IgG (Paul, 2026-06-17)"
   fitc_igg_specificity: "anti_human_confirmed"
   anti_igg_specificity_note: >
-    The anti-IgG-FITC secondary is confirmed as anti-human IgG. LYS241 is
-    humanized Glunomab, so this secondary targets LYS241 and does not bind
-    endogenous mouse IgG. This resolves the biological endogenous-IgG leakage
-    confound, but not the positivity threshold.
+    Control animal for background/threshold calibration. The anti-human
+    IgG-FITC secondary should not generate specific signal in no-LYS241 control
+    tissue; final threshold still requires calibration and review.

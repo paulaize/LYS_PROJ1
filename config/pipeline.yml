@@ -66,6 +66,16 @@ ihc:
 
   default_igg_fitc_channel_index: null
 
+  threshold_calibration:
+    reviewer: "Paul-Andréas"
+    status: "exploratory_no_prior_qupath_threshold"
+    downsample: 32.0
+    candidate_thresholds: [100, 250, 500, 1000, 2000, 4000, 8000, 16000]
+    notes: >
+      First-pass exploratory grid for IgG-FITC threshold sweeps. These values
+      are not final thresholds; final panel/batch thresholds require review and
+      sign-off using control images.
+
 compartments:
   # Milestone 4, unused in v1.
   peri_ring_mm: null

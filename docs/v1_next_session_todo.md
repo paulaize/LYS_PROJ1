@@ -27,13 +27,16 @@ no compartments, and no batch processing.
   and the team has not previously analyzed these images in QuPath. v1 must
   create the first calibration/exploration workflow; do not expect Paul to
   provide a pre-existing QuPath threshold.
+- IHC control reality: control animal `C6S5` has Panel A and Panel B `.vsi`
+  files under `data/C6S5/IHC/`. It has no MRI in v1 and is configured as an
+  IHC threshold/background control.
 
 ## Current status
 
 - [x] Existing `lys-bbb` environment is usable on macOS arm64.
 - [x] Required and optional Python imports pass.
 - [x] QuPath 0.7.0, brkraw, and napari command-line checks pass.
-- [x] `make test` passes: 29 tests.
+- [x] `make test` passes: 34 tests.
 - [x] MRI and IHC-ingest unit tests use synthetic data and pass.
 - [x] `make lint` passes.
 - [x] One real v1 animal is configured: `BD_08_5D`.
@@ -49,9 +52,37 @@ no compartments, and no batch processing.
 - [x] Current MRI threshold draft is known to be anatomically unreliable on
   `BD_08_5D` because it can select bright image-right peripheral signal. Treat
   it as a disposable seed; the human-corrected mask is the v1 output.
+- [x] IHC QuPath/Bio-Formats diagnostics work for one Panel A target section.
+- [x] First exploratory Panel A threshold sweep completed for
+  `BD_08_5D` section_01 and matching `C6S5` control section_01 at
+  `ihc.threshold_calibration.downsample=32.0`. Output:
+  `work/BD_08_5D/ihc_threshold_sweep_panel_A.csv`.
 - [ ] Git working tree is reviewed and clean. Recheck before editing; the
   current setup changes are intentionally uncommitted.
 - [ ] One real v1 animal has completed the full reviewed MRI + IHC path.
+
+## Immediate handoff for the next session
+
+Do not start by running the full panel. The next IHC goal is to turn the
+exploratory threshold machinery into a reviewable calibration workflow, then
+scale only to selected good sections.
+
+1. Inspect the first smoke-test CSV:
+   `work/BD_08_5D/ihc_threshold_sweep_panel_A.csv`. It contains Panel A
+   section_01 target/control threshold percentages and is explicitly not final.
+2. Add a visual threshold-review artifact, preferably exported overlay or PNG
+   thumbnails for the candidate thresholds, so Paul can approve/reject a
+   threshold using images rather than CSV values alone.
+3. Run the same one-section smoke test for Panel B target and C6S5 control.
+   Use `ihc-diagnose` first, then `ihc-threshold-sweeps`; keep
+   `--section section_01 --limit 1` until it succeeds.
+4. Add section QC/selection: record the best sections in
+   `selected_section_ids` or bad sections in `excluded_section_ids` before any
+   multi-section export.
+5. Add the threshold sign-off record: panel/batch scope, threshold value,
+   reviewer, date, target/control images used, and `approved` vs exploratory.
+6. Only after those gates, run deterministic IHC exports for the selected
+   sections and join them with the reviewed MRI row into the v1 CSV.
 
 ## Facts Paul must provide
 
@@ -69,9 +100,10 @@ Do not guess these values in code or config.
   selection/QC for tears and folds.
 - [x] Confirm the exact zero-based channel map and IgG-FITC channel index for
   each panel in QuPath/Bio-Formats.
-- [ ] Identify the NeuroTrace product/catalog number and emission. Current
-  working note: likely `640/660 Deep-Red Fluorescent Nissl Stain`; this is now
-  the remaining FITC-channel purity gate for Panel A only.
+- [x] Identify the NeuroTrace product/emission for v1: accepted as
+  `NeuroTrace 640/660 Deep-Red Fluorescent Nissl Stain` (Paul, 2026-06-17).
+  Panel A FITC spectral bleed-through is not flagged for v1. Paul may still do
+  a later full fluorochrome audit.
 - [x] Resolve what the anti-IgG-FITC reagent binds and whether it detects
   endogenous mouse IgG: confirmed anti-human IgG secondary, specific to
   humanized LYS241, not endogenous mouse IgG (Paul, 2026-06-17).
@@ -109,9 +141,9 @@ Complete these in order.
 
 ### P0: make the v1 IHC export scientifically usable
 
-The current exporter is preliminary: it counts the full rectangular image,
-including off-tissue background. The annotation created by
-`detect_cells.groovy` is not used by the exporter.
+The current exporter now requires `tissue_v1` and measures inside that
+annotation. The generated `tissue_v1` is rough and must be reviewed/corrected
+in QuPath before final measurements are trusted.
 
 - [x] Confirm whether the configured Panel A/B `.vsi` files contain all
   section series and decide the exact QuPath export iteration unit.
@@ -119,9 +151,11 @@ including off-tissue background. The annotation created by
   analysis/export; `tissue_v1` is the review/sign-off gate for the ROI used by
   the script, not hand analysis performed before scripting.
   Annotation name: `tissue_v1`.
-- [ ] Update `export_measurements.groovy` to require and measure only the
+- [x] Update `detect_cells.groovy` to create a rough signal-derived
+  `tissue_v1` annotation that Paul can correct/review in QuPath.
+- [x] Update `export_measurements.groovy` to require and measure only the
   reviewed tissue annotation, excluding off-tissue background.
-- [ ] Calculate `total_area_um2` from the measured tissue ROI, not the full
+- [x] Calculate `total_area_um2` from the measured tissue ROI, not the full
   image rectangle.
 - [ ] Fail helpfully when the tissue annotation, pixel calibration, confirmed
   channel index, or approved final threshold is missing. Exploratory threshold
@@ -133,6 +167,10 @@ including off-tissue background. The annotation created by
   downsample, and QC status in the QuPath export.
 - [ ] Test the revised exporter on one Panel A and one Panel B section before
   processing all sections.
+- [ ] Add section-selection review: process only the best few sections for v1,
+  with `selected_section_ids` / `excluded_section_ids` recorded in config.
+  If multiple good sections are selected, quantify each and aggregate later;
+  do not silently choose one section without QC provenance.
 
 ### P0: connect config, QuPath, and final provenance
 
@@ -160,6 +198,34 @@ including off-tissue background. The annotation created by
   control should provide clean background for background mean + k*SD
   calibration because the secondary is anti-human, but control paths must still
   come from config.
+- [x] Configure control animal `C6S5` for IHC threshold calibration. MRI is not
+  required for this control in v1.
+- [x] Add `export_threshold_sweep.groovy` so the first review output can be a
+  CSV sweep of candidate IgG-FITC thresholds inside `tissue_v1`.
+- [x] Add `make ihc-threshold-sweeps`, a Python/QuPath runner that can loop
+  BD_08_5D and C6S5 across configured section series for exploratory threshold
+  sweeps. Default is dry-run. First real execution should be one section only:
+  `RUN_ARGS="--panel A --section section_01 --target-only --limit 1 --run"`.
+- [x] Add `make ihc-diagnose`, a metadata-only QuPath/Bio-Formats opener for
+  one configured section. Run this before a real sweep to separate slow `.vsi`
+  series opening from slow pixel reads.
+- [ ] Resolve the current direct-CLI QuPath performance gate. Paul observed
+  that `RUN_ARGS="--panel A --run"` was too slow and had to be interrupted;
+  one-section diagnostics should decide whether v1 should continue with direct
+  `--image/--server` calls or switch to a QuPath project/cached-import path.
+  Status: direct CLI is usable for a single section at
+  `ihc.threshold_calibration.downsample=32.0`; Panel A section_01 target and
+  C6S5 control sweeps completed and wrote
+  `work/BD_08_5D/ihc_threshold_sweep_panel_A.csv`. Whole-panel execution is
+  still intentionally not validated and should wait until selected/best
+  sections are chosen.
+- [ ] Decide how to review threshold-sweep outputs visually. The current CSV
+  gives target/control percentages by threshold, but final v1 threshold approval
+  still needs either QuPath overlays, exported thumbnails, or another clear
+  review artifact attached to the approval record.
+- [x] Replace the fail-loud calibration placeholder with
+  `ihc_threshold_calibration_manifest.csv`, an exploratory manifest listing
+  panels, target/control files, candidate thresholds, and review status.
 - [ ] Add a review/sign-off record for the chosen IHC threshold: reviewer,
   date, control/source images, threshold value, panel/batch scope, and whether
   the result is exploratory or approved.

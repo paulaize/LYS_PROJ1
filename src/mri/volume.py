@@ -29,6 +29,8 @@ def per_slice_area_mm2(mask: np.ndarray,
     """
     in_plane = [s for i, s in enumerate(spacing_mm) if i != slice_axis]
     pixel_area = float(in_plane[0]) * float(in_plane[1])
-    # nonzero pixels per slice along slice_axis
+
+    # nonzero pixels per slice along slice_axis (this is the mask)
     counts = np.count_nonzero(np.moveaxis(mask, slice_axis, 0), axis=(1, 2))
+
     return counts.astype(float) * pixel_area

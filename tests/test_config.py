@@ -77,8 +77,20 @@ def test_real_v1_animal_resolves_anti_human_igg_specificity():
 
 def test_real_v1_animal_splits_panel_spectral_bleedthrough():
     cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
-    assert cfg.panel_config("A")["fitc_spectral_bleedthrough"] == "pending_neurotrace_emission"
+    assert cfg.panel_config("A")["neurotrace_emission_confirmed"] is True
+    assert cfg.panel_config("A")["fitc_spectral_bleedthrough"] == "none"
     assert cfg.panel_config("B")["fitc_spectral_bleedthrough"] == "none"
+
+
+def test_control_animal_config_records_ihc_without_mri():
+    cfg = load_config("config/animals/C6S5.yml", repo_root=REPO)
+    assert cfg.animal_id == "C6S5"
+    assert cfg.has_mri is False
+    assert cfg.animal["group"] == "control"
+    for panel in ("A", "B"):
+        assert cfg.panel_igg_fitc_channel_index(panel) == 1
+        with pytest.raises(ValueError):
+            cfg.panel_igg_fitc_threshold(panel)
 
 
 def test_real_v1_animal_records_qupath_series_layout():

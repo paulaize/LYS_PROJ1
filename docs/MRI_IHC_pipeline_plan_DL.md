@@ -122,7 +122,15 @@ Recommendation: classical/AIDAmri stays primary here — lesion-induced deformat
 ## 3. IHC track (deep-learning-first)
 
 ### 3.1 .vsi + channel map (QC gate, unchanged)
-Bio-Formats reads `.vsi` natively in QuPath/Fiji — keep as working format. **Confirm channel→marker map per panel** (Panel A: DAPI/NeuroTrace/Podo/FITC; Panel B: DAPI/IBA1/GFAP/FITC) and **NeuroTrace emission** (green variant bleeds into FITC). Anti-IgG specificity is resolved as anti-human IgG-FITC specific to humanized LYS241. No prior QuPath/IgG-FITC positivity threshold exists for these images, so threshold calibration/review remains a pipeline task. DL changes none of the remaining threshold/spectral QC requirements.
+Bio-Formats reads `.vsi` natively in QuPath/Fiji — keep as working format.
+**Confirm channel→marker map per panel** (Panel A:
+DAPI/NeuroTrace/Podo/FITC; Panel B: DAPI/IBA1/GFAP/FITC). For v1, Panel A
+NeuroTrace is accepted as 640/660 deep-red, so FITC spectral bleed-through is
+not flagged; Paul may still do a later full fluorochrome audit. Anti-IgG
+specificity is resolved as anti-human IgG-FITC specific to humanized LYS241. No
+prior QuPath/IgG-FITC positivity threshold exists for these images, so
+threshold calibration/review remains a pipeline task. DL changes none of the
+remaining threshold QC requirements.
 
 ### 3.2 Section → Allen registration (◆ DL)
 | Option | Flow | Notes |
@@ -256,7 +264,8 @@ Stop where accuracy is good enough for the biology. For a 10-animal exploratory 
 Being honest so you can defend the choices: **volume integration, geometric compartments, midline mirroring, the region/compartment join, and the table** stay deterministic — they're exact arithmetic/geometry where a network only adds error and opacity. **Atlas registration of lesioned brains** stays classical (SyN/AIDAmri) because learned deformable registration is least reliable exactly where deformation is largest. And **GFAP/IBA1 quantification** stays area-fraction, not cell-DL, because the biology is morphological. "Deep-learning-first" means DL owns every pixel-interpretation task and every one gets a human gate — not that DL is bolted onto steps that don't need it.
 
 ### Open items to finalize (same as baseline)
-1. NeuroTrace variant/emission (Panel A FITC spectral overlap).
+1. NeuroTrace variant/emission: accepted for v1 as 640/660 deep-red; later full
+   fluorochrome audit optional.
 2. Exact `.vsi` channel order per panel for new animals. The current
    `BD_08_5D` maps are in its animal YAML.
 3. IgG-FITC positivity threshold calibration from configured controls / approved

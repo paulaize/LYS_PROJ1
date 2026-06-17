@@ -122,27 +122,99 @@ outputs, and require human sign-off before final positive-area measurements are
 accepted. QuPath is the viewer/export engine here; it is not assumed to provide
 a scientifically valid threshold automatically.
 
-The current exporter is preliminary because it measures the full rectangular
-image, including off-tissue background. Do not treat its positive-area result
-as final until the tissue-ROI and provenance tasks in
-[`docs/v1_next_session_todo.md`](docs/v1_next_session_todo.md) are complete.
+The current control animal for threshold/background calibration is `C6S5`:
+
+- Panel A: `data/C6S5/IHC/panel_A/BD_08_C6S5 C-_01.vsi`
+- Panel B: `data/C6S5/IHC/panel_B/BD_08_C6S5 C- IBA1 GFAP IgG_01.vsi`
+
+Create the first threshold-calibration manifest:
+
+```bash
+make calibrate-ihc CONFIG=config/animals/BD_08_5D.yml
+```
+
+This writes `work/BD_08_5D/ihc_threshold_calibration_manifest.csv`. It is a
+review plan, not an approved threshold.
+
+Generate all exploratory threshold-sweep QuPath commands without running them:
+
+```bash
+make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml
+```
+
+Run only Panel A commands:
+
+```bash
+make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A"
+```
+
+Before running a real threshold sweep, diagnose one configured section. This
+opens the `.vsi` series and writes metadata only; it does not read image pixels
+or compute thresholds.
+
+```bash
+make ihc-diagnose CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --target-only --limit 1 --run --timeout-seconds 180"
+```
+
+If this times out, the bottleneck is direct QuPath/Bio-Formats opening of the
+`.vsi` series and the next step is to move through a QuPath project/cached
+import path rather than repeated direct CLI image opens.
+
+If diagnostics succeeds, execute one threshold-sweep test command:
+
+```bash
+make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --target-only --limit 1 --run --timeout-seconds 600"
+```
+
+If that succeeds, run the matching C6S5 control section:
+
+```bash
+make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --controls-only --limit 1 --run --append"
+```
+
+Only after the target/control one-section smoke test succeeds and the best
+sections have been selected should you scale up. Do not use the old
+`downsample=8.0` command for exploratory sweeps; the v1 config uses
+`ihc.threshold_calibration.downsample=32.0` for this first pass.
+
+Then scale up to the chosen sections, or to the whole panel if needed:
+
+```bash
+make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --run"
+```
+
+The sweep runner processes BD_08_5D and the C6S5 control across configured
+section series `2..9`, writes
+`work/BD_08_5D/ihc_threshold_sweep_panel_<panel>.csv`, and flags results as
+`threshold_sweep_not_final`. It uses a rough automatic tissue ROI in memory at
+the exploratory downsample configured in `config/pipeline.yml`, so this is for
+threshold exploration only; final export still needs reviewed `tissue_v1`.
+
+The current exporter requires `tissue_v1` and measures inside that annotation,
+not the full rectangular image. Do not treat its positive-area result as final
+until `tissue_v1` has been reviewed/corrected and the IgG-FITC threshold has
+been approved.
 
 Example shape:
 
 ```bash
 QuPath script --image "/path/to/section.vsi" \
-  --args "A" \
+  --args "A,tissue_v1,16,200" \
   src/ihc/qupath/detect_cells.groovy
 
 QuPath script --image "/path/to/section.vsi" \
-  --args "A,$PWD/work/BD_08_5D/ihc_A.csv,1,<approved_threshold>,8" \
+  --args "A,$PWD/work/BD_08_5D/ihc_threshold_sweep_A.csv,1,100;250;500;1000;2000;4000;8000;16000,8,tissue_v1,section_01" \
+  src/ihc/qupath/export_threshold_sweep.groovy
+
+QuPath script --image "/path/to/section.vsi" \
+  --args "A,$PWD/work/BD_08_5D/ihc_A.csv,1,<approved_threshold>,8,tissue_v1,section_01,approved" \
   src/ihc/qupath/export_measurements.groovy
 ```
 
 Argument order for `export_measurements.groovy`:
 
 ```text
-panel,out_csv,igg_fitc_channel_index,igg_fitc_threshold,downsample
+panel,out_csv,igg_fitc_channel_index,igg_fitc_threshold,downsample,tissue_annotation_name,section_id,threshold_status
 ```
 
 Do not trust the placeholder threshold above. Fill it only after the calibration
@@ -187,5 +259,5 @@ lives in provenance flags.
 
 This confirmation does not set the positivity threshold. IgG-FITC threshold
 calibration still needs to be built and reviewed because no prior QuPath
-threshold exists. Panel A still has a separate spectral bleed-through gate
-until NeuroTrace emission is confirmed; Panel B does not.
+threshold exists. Panel A NeuroTrace is accepted as 640/660 deep-red for v1, so
+Panel A FITC spectral bleed-through is not flagged at this stage.

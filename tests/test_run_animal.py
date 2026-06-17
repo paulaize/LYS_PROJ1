@@ -47,8 +47,8 @@ def test_ihc_rows_carry_resolved_specificity_and_panel_spectral_flags(tmp_path: 
     assert bool(panel_a["fitc_specific_to_lys241"]) is True
     assert panel_a["fitc_specificity_source"] == "confirmed_anti_human_IgG (Paul, 2026-06-17)"
     assert panel_a["fitc_igg_specificity"] == "anti_human_confirmed"
-    assert panel_a["fitc_spectral_bleedthrough"] == "pending_neurotrace_emission"
-    assert "fitc_spectral_bleedthrough_pending_neurotrace_emission" in panel_a["qc_flag"]
+    assert panel_a["fitc_spectral_bleedthrough"] == "none"
+    assert "fitc_spectral_bleedthrough" not in panel_a["qc_flag"]
     assert panel_b["fitc_spectral_bleedthrough"] == "none"
     assert "fitc_spectral_bleedthrough" not in panel_b["qc_flag"]
 
