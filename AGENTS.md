@@ -35,7 +35,7 @@ v1 includes:
 - NIfTI load + header/spacing sanity.
 - N4 bias correction.
 - simple brain mask / hemisphere support.
-- threshold lesion segmentation.
+- an automatic draft lesion mask, currently from threshold segmentation.
 - human mask review/edit gate.
 - anisotropic lesion volume from NIfTI header spacing.
 - Swanson/indirect edema correction on the **human-corrected** mask.
@@ -53,11 +53,20 @@ v1 deliberately excludes:
 
 Later features must be added behind stable interfaces rather than by rewriting the v1 spine.
 
+Current v1 MRI policy: the automatic lesion mask is only a draft and may be
+very wrong. For `BD_08_5D` it can be pulled toward bright peripheral artifacts
+even though the true lesion is expected on image-right in the isocortex above
+the corpus callosum. Do not spend v1 time adding atlas/DL/isocortex ROI
+heuristics unless Paul explicitly redirects the work. The reviewed/corrected
+human mask is the source of truth for v1 volume, and a full manual redraw is
+acceptable when the draft is a poor seed.
+
 ---
 
 ## 3. Environment: use the existing `lys-bbb` conda env
 
-Use Paul’s current conda env. Do **not** create a new `stroke-pipeline` env unless Paul explicitly asks.
+Use Paul’s current conda env. Do **not** create a new env, including the older
+planned name `stroke-pipeline`, unless Paul explicitly asks.
 
 - env name: `lys-bbb`
 - typical env path: `/opt/anaconda3/envs/lys-bbb`
@@ -132,19 +141,43 @@ External apps are not Python packages:
 - `.vsi`: Olympus fluorescence WSI, uint16, 20×, ~0.325 µm/px, pyramidal, ~3 GB each, 4 channels, 8 sections/animal/panel + 1 overview.
 - Panel A expected markers: DAPI, NeuroTrace, Podocalyxin, anti-IgG-FITC.
 - Panel B expected markers: DAPI, IBA1, GFAP, anti-IgG-FITC.
-- Exact channel order per panel = **TODO**. Read from config; never assume `channel 0 = DAPI`.
+- The current v1 animal `BD_08_5D` has confirmed panel channel maps in
+  `config/animals/BD_08_5D.yml`. Future animals still need their own confirmed
+  channel maps. Read channel order from config; never assume `channel 0 = DAPI`.
 - NeuroTrace emission = **TODO**. Green NeuroTrace can overlap FITC.
 
 ### FITC / LYS241 confound
 
-Anti-IgG-FITC detects deposited IgG. After stroke, BBB breakdown lets endogenous mouse IgG leak into parenchyma, especially in the core. Unless the secondary is specific to LYS241’s isotype/species, FITC signal mixes drug-associated signal and native IgG leakage.
+Confirmed fact (Paul, 2026-06-17): the anti-IgG-FITC secondary is an
+**anti-human IgG** antibody. LYS241 is humanized Glunomab, so the secondary
+specifically targets LYS241 and does **not** bind endogenous mouse IgG. The
+post-stroke endogenous-IgG-leakage biological confound is resolved.
+
+This resolves interpretation specificity, not positivity thresholding. The
+IgG-FITC positive threshold still needs calibration/sign-off from configured
+controls or an approved calibration rule.
+
+No approved IgG-FITC positivity threshold exists yet for the current IHC
+images. This is the first quantitative analysis of these slides, and Paul's
+team has not already established QuPath thresholds. Do not assume QuPath will
+provide a scientifically valid "basic threshold" by itself. v1 must include a
+calibration/exploration workflow that proposes candidate thresholds from
+configured controls or documented image statistics, then requires human
+sign-off before final positive-area measurements are accepted. Candidate
+thresholds may be exported for review only if clearly marked exploratory/not
+final.
 
 Therefore:
 
 - In code and tables, call the marker/readout **`IgG-FITC`** or `igg_fitc_*`, not direct `LYS241 concentration`.
 - Do not name v1 measures `lys241_*`.
-- Carry/flag `fitc_specific_to_lys241` or equivalent interpretation metadata.
-- Core-region values will need special interpretation once compartments exist.
+- Carry `anti_igg_specificity_resolved=true`,
+  `fitc_specific_to_lys241=true`, `fitc_igg_specificity="anti_human_confirmed"`,
+  and source `"confirmed_anti_human_IgG (Paul, 2026-06-17)"` in provenance.
+- Keep spectral bleed-through separate from biological specificity. Panel A has
+  NeuroTrace and must carry `fitc_spectral_bleedthrough` until the NeuroTrace
+  emission/control confirms that it cannot contaminate FITC. Panel B has no
+  NeuroTrace and can carry `fitc_spectral_bleedthrough="none"`.
 
 ### Registration and compartments
 
@@ -183,7 +216,6 @@ Adding optional keyword-only arguments is acceptable when needed for orchestrati
 LYS_PROJ1/
 ├── AGENTS.md
 ├── CLAUDE.md
-├── .codex/
 ├── env/
 ├── config/
 │   ├── pipeline.yml
@@ -204,6 +236,8 @@ LYS_PROJ1/
 ├── outputs/                     # gitignored final outputs
 └── notebooks/                   # # %% scratch .py only
 ```
+
+A `.codex/` directory is optional and is not required in the current checkout.
 
 ---
 
@@ -234,20 +268,27 @@ MRI code is done only when:
 - NIfTI loads from a configured path.
 - Header spacing is read and validated.
 - Volume math uses header spacing, not isotropic assumptions.
-- A binary lesion mask produces a plausible mm³ number.
+- A reviewed/corrected binary lesion mask produces a plausible mm³ number.
 - Human edit metadata is carried: `edited`, `edit_dice`, `reviewer`, `qc_flag`.
 - Unreviewed fallback masks are clearly flagged `needs_human_review` and are not treated as final QC-pass data.
+- The automatic draft mask is not treated as scientific output. If it targets
+  artifact or the wrong anatomy, the reviewer should erase/redraw it and the
+  corrected mask is what volume and edema correction use.
 
 IHC code is done only when:
 
 - QuPath export CSV is parsed into tidy long rows.
-- IgG-FITC positive area is measured against a reviewed tissue ROI, not the
-  full rectangular image including off-tissue background.
+- IgG-FITC positive area is produced by the scripted analysis against a
+  reviewed/approved tissue ROI (`tissue_v1`), not by hand analysis and not from
+  the full rectangular image including off-tissue background.
 - FITC readouts are labeled as IgG-FITC, not direct LYS241 concentration.
 - Channel/threshold facts are config-driven or explicitly passed from config.
 - Missing channel order or threshold produces a helpful error, not a guessed result.
+- Because no prior QuPath threshold exists, v1 includes creating the first
+  calibration/sign-off path; it must not require Paul to supply a pre-existing
+  threshold from earlier analysis.
 - Re-running an export does not silently duplicate section measurements.
-- Specificity/overlap interpretation flags and IHC threshold provenance are
+- Specificity, spectral bleed-through, and IHC threshold provenance are
   carried into deliverables or an attached provenance table.
 
 Joined v1 output is done only when one command writes a CSV with at least:
@@ -298,14 +339,19 @@ Files under `legacy/context_code/` are reference-only scripts from earlier local
 
 - The prioritized and actionable version of this list is maintained in
   `docs/v1_next_session_todo.md`.
-- [ ] Exact `.vsi` channel order per panel.
-- [ ] NeuroTrace variant / emission.
-- [ ] anti-IgG-FITC specificity to LYS241 vs generic IgG.
-- [ ] Exact input paths and brkraw NIfTI naming.
-- [ ] Which animal is the v1 test case.
+- [x] Current v1 animal/channel/path facts are recorded for `BD_08_5D` in
+  `config/animals/BD_08_5D.yml`. New animals must still provide their own
+  config facts.
+- [ ] NeuroTrace variant / emission confirmation. Current working note for
+  `BD_08_5D` Panel A is likely 640/660 deep-red, but it is not yet confirmed.
+- [x] anti-IgG-FITC specificity to LYS241 vs generic IgG: resolved as
+  anti-human IgG specific to humanized LYS241 (Paul, 2026-06-17).
 - [ ] Péri-lesional ring width in mm, later milestone.
-- [ ] v1 threshold `k` and IgG-FITC positive threshold after QC/tuning.
-- [ ] Which 3D mask editor to standardize on: napari, ITK-SNAP, 3D Slicer, or Fiji/Labkit.
+- [ ] IgG-FITC positive threshold after control-based calibration.
+- [ ] MRI threshold `k` only if the draft-threshold backend is tuned later;
+  it is not a gate for v1 if the corrected human mask is used.
+- [x] Initial v1 mask editor is napari. Keep the interface open to ITK-SNAP,
+  3D Slicer, or Fiji/Labkit later.
 
 ---
 

@@ -4,6 +4,14 @@
 
 **Study shape (current protocol).** ~10 stroke animals + 3 controls. Cross-sectional design: each animal is one timepoint (1h, 3h, 6h, 24h, 48h, 5d after thrombin-model induction, Drieu et al. 2020). MRI exists only for 24h/48h/5d (later timepoints where T2 lesion is established). Per animal: 8 IHC sections × 2 marker panels; ~18 coronal T2 slices.
 
+**Current implementation override.** The active v1 is intentionally smaller
+than this full design: one animal (`BD_08_5D`), no atlas, no DL, no
+compartments, no cell-level IHC. The MRI threshold mask is only an untrusted
+draft; the reviewed/corrected mask is the v1 source of truth. IHC v1 is scripted
+IgG-FITC positive area inside a reviewed `tissue_v1` ROI, not hand analysis and
+not full cell detection. No approved IgG-FITC/QuPath positivity threshold
+exists yet; v1 must create the first calibration and review/sign-off workflow.
+
 ---
 
 ## 0. Architecture at a glance
@@ -13,7 +21,7 @@
               │                                                                                  │
    MRI track  │  Bruker  →  NIfTI  →  preprocess  →  lesion seg  →  edema corr  →  MRI→Allen reg │
    (T2 RARE)  │  (brkraw)   (you)     (denoise,        (semi-auto,    (Swanson /     (AIDAmri /  │
-              │                        N4, strip)       Fiji QC)       atlas-based)   ANTs)       │
+              │                        N4, strip)       mask QC)       atlas-based)   ANTs)       │
               │                                              │                          │         │
               │                                       lesion mask in Allen ────────────►│         │
               │                                                                          ▼         │
@@ -74,7 +82,13 @@ You already do Bruker→NIfTI (brkraw). Then, per volume:
 | C. Mirror z-score map | Register hemisphere to its mirror, lesion = where ipsi ≫ contra; threshold the difference map | Med | Robust to global intensity; elegant | Map exported to Fiji ✔ |
 | D. Deep learning | nnU-Net / a rodent-stroke U-Net | High (needs ~annotated set) | Best at scale | — |
 
-**Recommendation:** **B as primary** (a Labkit/Weka classifier your collaborators can open, tweak, and re-run), with **A as an automatic first guess** that B corrects, and **C** as a cross-check. **Defer D** until you have ≥1 protocol's worth of curated masks to train on — then it becomes nearly free per-animal. Every mask gets a human QC pass in Fiji (§8).
+**Recommendation:** For the full pipeline, **B as primary** (a Labkit/Weka
+classifier your collaborators can open, tweak, and re-run), with **A as an
+automatic first guess** that B corrects, and **C** as a cross-check. **Defer D**
+until you have curated masks to train on. For the current v1, do not block on
+improving the automatic method: if the threshold draft targets artifact or the
+wrong anatomy, erase/redraw it and use the corrected mask as truth. Every mask
+gets a human QC/correction pass.
 
 ### 2.4 Edema correction — options
 Raw lesion volume overstates infarct because the ipsilateral hemisphere swells. Options:
@@ -117,10 +131,16 @@ Output: a per-animal label image (0=other,1=core,2=peri,3=contra-core,4=contra-p
 ### 3.1 .vsi handling + channel map (first QC gate)
 - Each `.vsi`: Olympus VS-series, fluorescence, uint16, 20×, **0.325 µm/px**, pyramidal, ~3 GB, **4 channels (CZT 4×1×1)**, 8 sections/animal/panel + 1 overview. Bio-Formats reads these natively in QuPath and Fiji — no conversion needed; **keep `.vsi` as the working format** so collaborators open them as usual.
 - **Required before anything:** a definitive **channel → marker table per panel.**
-  - Panel A (10 slides): DAPI, **NeuroTrace** (neurons), **Podocalyxin** (endothelium), **Anti-IgG-FITC** (= LYS241).
-  - Panel B (10 slides): DAPI, **IBA1** (microglia), **GFAP** (astrocytes), **Anti-IgG-FITC** (= LYS241).
-  - Record each fluorophore's **emission**. NeuroTrace ships in blue/green/red/deep-red variants; if you're running the **green** NeuroTrace it overlaps FITC and will contaminate the LYS241 channel — confirm it's a non-green variant, or plan spectral unmixing.
-- **Confounder flag (carry into interpretation):** anti-IgG-FITC detects deposited IgG. Post-stroke BBB breakdown lets **endogenous mouse IgG** leak into parenchyma (worst in the core). Unless the secondary is specific to the LYS241 isotype/species, "% LYS241" partly measures native IgG extravasation. Mitigations: isotype/species-specific secondary, a vehicle/no-drug control to subtract, and/or treating core-region LYS241 cautiously. **Resolve before quantifying.**
+  - Panel A (10 slides): DAPI, **NeuroTrace** (neurons), **Podocalyxin** (endothelium), **IgG-FITC** readout, interpreted as LYS241-associated through provenance.
+  - Panel B (10 slides): DAPI, **IBA1** (microglia), **GFAP** (astrocytes), **IgG-FITC** readout, interpreted as LYS241-associated through provenance.
+  - Record each fluorophore's **emission**. NeuroTrace ships in blue/green/red/deep-red variants; if you're running the **green** NeuroTrace it overlaps FITC and will contaminate the IgG-FITC channel — confirm it's a non-green variant, or plan spectral unmixing.
+- **Specificity flag (resolved 2026-06-17):** Paul confirmed the secondary is **anti-human IgG-FITC**. LYS241 is humanized Glunomab, so the FITC readout is specific to LYS241 and does not bind endogenous mouse IgG. Keep the measured variable named **IgG-FITC** / `igg_fitc_*`; the LYS241 interpretation lives in provenance flags. This does not set the positivity threshold.
+- **Threshold flag (open):** these images have not previously been quantified
+  in QuPath, and no one on the team has an existing threshold to supply. QuPath
+  may be used for visualization/review, but it is not assumed to provide a
+  scientifically valid automatic threshold. The pipeline should generate
+  candidate thresholds from controls or documented image statistics, then store
+  the approved threshold and reviewer provenance before final export.
 
 ### 3.2 Section → Allen registration with ABBA — options
 
@@ -155,13 +175,18 @@ Use **both, matched to the biology of each marker.** This is the current convent
 
 | Readout | Best-practice measure | Why |
 |---|---|---|
-| **LYS241 in neurons / endothelium** | **Object-level**: mean LYS241 (FITC) intensity *per classified cell*, + % of that cell type that is LYS241⁺ | You want drug *per cell type* → must attribute signal to segmented cells |
-| **LYS241 overall burden** | **Area-level**: **% positive area** (FITC) per region/compartment, intensity-thresholded | Drug is partly extracellular/perivascular; area-fraction captures diffuse deposition cells miss |
+| **IgG-FITC in neurons / endothelium** | **Object-level**: mean IgG-FITC intensity *per classified cell*, + % of that cell type that is IgG-FITC-positive | You want the LYS241-associated readout per cell type → must attribute signal to segmented cells |
+| **IgG-FITC overall burden** | **Area-level**: **% positive area** for IgG-FITC per region/compartment, intensity-thresholded | LYS241-associated signal can be partly extracellular/perivascular; area-fraction captures diffuse deposition cells miss |
 | **DAPI** | **Object-level density**: nuclei count ÷ region area (cells/mm²) | "Densité DAPI" is by definition a count density |
 | **GFAP, IBA1** | **Area-level** (% positive area) as primary; soma counts secondary; optionally skeleton/branching for microglial activation morphology | Astro/microglia are morphological; area & morphology beat nucleus counts |
 | **Podocalyxin / NeuroTrace** | Object-level for classification; area-fraction as QC | Used mainly to define the cell compartments |
 
-So the table holds, per region×compartment: cell-type counts & densities (object), cell-type-specific LYS241 intensity (object), and % positive area for LYS241/GFAP/IBA1 (area). Report **both** — reviewers in this field expect cell-resolved numbers *and* area fractions, and they fail differently (segmentation errors vs threshold sensitivity), so agreement between them is itself a quality signal.
+So the table holds, per region×compartment: cell-type counts & densities
+(object), cell-type-specific IgG-FITC intensity (object), and % positive area
+for IgG-FITC/GFAP/IBA1 (area). Report **both** — reviewers in this field
+expect cell-resolved numbers *and* area fractions, and they fail differently
+(segmentation errors vs threshold sensitivity), so agreement between them is
+itself a quality signal.
 
 ### 3.6 Compartments in IHC
 Two sources, combined:
@@ -177,7 +202,8 @@ Hemisphere (ipsi/contra) is a top-level split derived from the atlas midline, re
 
 For each cell (IHC) and each lesion voxel (MRI), you now have: `animal, timepoint, panel, hemisphere, Allen_region, compartment`. The **join** is on `(animal, Allen_region, compartment, hemisphere)`:
 - MRI contributes: lesion volume (raw + corrected), per-region lesion fraction, edema, hemorrhage flag.
-- IHC contributes: cell counts/densities by type, LYS241 per cell type, % positive areas, DAPI density.
+- IHC contributes: cell counts/densities by type, IgG-FITC readouts per cell
+  type, % positive areas, DAPI density.
 
 Because both sides carry the same region+compartment vocabulary, the join is a clean relational merge in pandas — no image-to-image warping needed at this stage.
 
@@ -189,7 +215,7 @@ One row per `animal × region × compartment × cell_type × measure`:
 
 | column | example | source |
 |---|---|---|
-| animal_id | M07 | meta |
+| animal_id | BD_08_5D | meta |
 | timepoint | 24h | meta |
 | panel | A (NeuroT/Podo) | meta |
 | hemisphere | ipsi | atlas |
@@ -197,7 +223,7 @@ One row per `animal × region × compartment × cell_type × measure`:
 | compartment | peri | MRI→atlas |
 | compartment_method | MRI-geometric / histo-proxy | pipeline |
 | cell_type | neuron | classifier |
-| measure | LYS241_mean_intensity | readout |
+| measure | igg_fitc_mean_intensity | readout |
 | value | 1234.5 | readout |
 | unit | a.u. (16-bit) | — |
 | n_cells | 842 | detection |
@@ -209,7 +235,7 @@ Keep it **long** (one measure per row) so it drops straight into R/`ggplot`/mixe
 ---
 
 ## 6. Direct MRI↔IHC overlay (figure-only, second pass)
-Once §1–4 work, generate overlays *through* the atlas: for an IHC section at Allen plane *p*, resample the MRI lesion mask at plane *p* and composite. This gives publication overlays ("LYS241⁺ endothelium sits in the T2 peri-lesional rim") without a fragile direct registration. For a hero figure needing pixel-tight overlay, do a **one-off manual** BigWarp of that specific section to that specific MRI slice — acceptable for a figure, not for quantification.
+Once §1–4 work, generate overlays *through* the atlas: for an IHC section at Allen plane *p*, resample the MRI lesion mask at plane *p* and composite. This gives publication overlays ("IgG-FITC-positive endothelium sits in the T2 peri-lesional rim") without a fragile direct registration. For a hero figure needing pixel-tight overlay, do a **one-off manual** BigWarp of that specific section to that specific MRI slice — acceptable for a figure, not for quantification.
 
 ---
 
@@ -224,7 +250,8 @@ Once §1–4 work, generate overlays *through* the atlas: for an IHC section at 
 
 **Interactive (QC gates, humans in QuPath/Fiji):**
 - Channel-map confirmation (§3.1).
-- Lesion-mask review in Fiji.
+- Lesion-mask review/correction. Current v1 uses napari; ITK-SNAP, 3D Slicer,
+  or Fiji/Labkit can replace it later if they are better for careful drawing.
 - ABBA alignment review (two-person on a subset).
 - Classifier spot-check.
 
@@ -236,13 +263,13 @@ This satisfies "automate where accuracy allows, but they still open images in th
 
 ## 8. QC gates (each must pass before the next stage)
 1. **Header/spacing** correct on every NIfTI (voxel = 0.07×0.07×0.5 mm).
-2. **Channel map** confirmed per panel; NeuroTrace-vs-FITC overlap ruled out.
+2. **Channel map** confirmed per panel; Panel A NeuroTrace-vs-FITC spectral overlap ruled out.
 3. **Bias correction** visibly flattened before thresholding.
 4. **Lesion mask** reviewed in Fiji (over/under-segmentation, hemorrhage exclusion).
 5. **MRI→Allen** registration overlay inspected (esp. large 5d lesions).
 6. **ABBA** alignment double-checked on a subset.
 7. **Cell detection** count sanity (InstanSeg vs StarDist agreement on one slide).
-8. **anti-IgG specificity** resolved (control subtraction or specific secondary).
+8. **anti-IgG specificity** resolved as anti-human IgG specific to LYS241.
 9. **Object vs area** readouts broadly agree per region; large divergence → investigate.
 
 ---
@@ -250,7 +277,11 @@ This satisfies "automate where accuracy allows, but they still open images in th
 ## 9. Suggested build order (time-boxed — get value early, don't over-engineer)
 
 **Phase 1 — vertical slice on ONE animal (prove the spine).**
-MRI: Bruker→NIfTI → N4 → threshold lesion → volume. IHC: one `.vsi` → QuPath → InstanSeg on DAPI → threshold classify → % positive area + per-cell LYS241. No atlas yet. Output a mini table. *This de-risks the whole thing in days, not weeks.*
+MRI: Bruker→NIfTI → N4 → threshold draft → human correction/redraw → volume.
+IHC: one `.vsi` → QuPath scripted measurement inside reviewed `tissue_v1` →
+first IgG-FITC threshold calibration/review → IgG-FITC % positive area. No
+atlas, no DL, no compartments, no cell-level IHC yet. Output a mini table.
+*This de-risks the whole thing in days, not weeks.*
 
 **Phase 2 — add the atlas to both halves.**
 MRI→Allen via AIDAmri; IHC→Allen via ABBA+DeepSlice. Now regions appear in the table.
@@ -284,8 +315,10 @@ Stop at the phase where accuracy is "good enough for the biology" — for a 10-a
 ---
 
 ### Open items I need from you to finalize parameters
-1. **anti-IgG-FITC specificity** — isotype/species-specific to LYS241, or generic? (Decides whether core LYS241 is trustworthy.)
-2. **NeuroTrace variant / emission** — green or non-green? (Decides FITC contamination risk.)
-3. **Exact channel order** in the `.vsi` per panel.
+1. **NeuroTrace variant / emission** — green or non-green? (Decides Panel A FITC spectral contamination risk.)
+2. **Exact channel order** in the `.vsi` per panel for new animals. The current
+   `BD_08_5D` channel maps are recorded in its animal YAML.
+3. **IgG-FITC positivity threshold calibration** from configured controls /
+   approved rule. There is no prior QuPath threshold to reuse.
 4. Whether you want **AIDAmri adopted wholesale** for the MRI half, or a leaner ANTs-only registration you control end-to-end.
 5. Péri-lesional **ring width** you consider biologically meaningful (sets the peri compartment).

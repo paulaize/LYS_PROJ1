@@ -3,7 +3,7 @@ CONFIG ?= config/animals/TEMPLATE.yml
 IHC ?=
 RUN_ARGS ?=
 
-.PHONY: env-check test lint convert-mri run clean
+.PHONY: env-check test lint convert-mri calibrate-ihc run clean
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
@@ -16,6 +16,9 @@ lint:
 
 convert-mri:
 	conda run -n $(ENV) python scripts/convert_bruker_t2.py --config $(CONFIG)
+
+calibrate-ihc:
+	conda run -n $(ENV) python -m src.ihc.calibrate --config $(CONFIG)
 
 # Run one animal:
 #   make run CONFIG=config/animals/M07.yml RUN_ARGS=--no-mask-editor [IHC=work/M07/ihc_A.csv]

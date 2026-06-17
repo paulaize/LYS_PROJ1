@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from src.mri.edema import swanson_corrected_volume
-from src.mri.edit import dice, review_mask
+from src.mri.edit import _editor_scale, _from_editor_order, _to_editor_order, dice, review_mask
 from src.mri.segment import segment_lesion
 from src.mri.volume import mask_volume_mm3, per_slice_area_mm2, voxel_volume_mm3
 
@@ -76,6 +76,21 @@ def test_review_mask_can_skip_gui_for_technical_run(tmp_path):
     assert meta["edited"] is False
     assert meta["dice"] == 1.0
     assert (tmp_path / "lesion_corrected.npy").exists()
+
+
+def test_napari_editor_order_uses_slice_y_x_layout():
+    arr = np.zeros((256, 256, 18), dtype=np.float32)
+    arr[10, 20, 3] = 1
+
+    display = _to_editor_order(arr)
+
+    assert display.shape == (18, 256, 256)
+    assert display[3, 20, 10] == 1
+    np.testing.assert_array_equal(_from_editor_order(display), arr)
+
+
+def test_editor_scale_moves_slice_spacing_first():
+    assert _editor_scale(SPACING) == (0.5, 0.07, 0.07)
 
 
 def test_threshold_segmenter_uses_configured_image_right_side():

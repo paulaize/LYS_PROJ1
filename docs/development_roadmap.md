@@ -9,18 +9,32 @@
 4. **Don't let model wrangling block the spine.** If the pretrained lesion model isn't runnable in an hour, v1 uses thresholding and the model becomes a v2 task.
 5. **Human gate from day one** — even v1's lesion mask gets a manual edit pass; that's cheap and it's the habit the whole design depends on.
 
+**Current v1 MRI decision.** The threshold mask is an untrusted draft, not the
+scientific result. For `BD_08_5D` it can select bright peripheral artifact
+instead of the image-right isocortical lesion. Do not block v1 on adding an
+isocortex ROI, Allen registration, or DL. If the draft is bad, the reviewer
+erases/redraws it, and the corrected mask is the v1 source of truth and future
+model-reference data.
+
+**Current v1 IHC threshold decision.** No approved QuPath/IgG-FITC positivity
+threshold exists yet. This project is the first quantitative analysis of these
+IHC images, so v1 must build the threshold-calibration/review workflow rather
+than requiring Paul or the team to provide a number from previous QuPath work.
+Exploratory threshold sweeps can be generated, but final positive-area rows
+need an approved threshold recorded in config/provenance.
+
 ---
 
 ## Repo & data layout (set up in Milestone 0)
 
 ```
-stroke-pipeline/
+LYS_PROJ1/
 ├── env/
 │   └── environment.yml
 ├── config/
 │   ├── pipeline.yml            # global params (peri-ring width, thresholds, model versions)
 │   └── animals/
-│       └── M07.yml             # per-animal: paths, timepoint, panel, channel map
+│       └── BD_08_5D.yml        # current v1 animal: paths, timepoint, panel, channel map
 ├── src/
 │   ├── mri/
 │   │   ├── io.py               # load/save NIfTI, header sanity (pathlib)
@@ -51,8 +65,8 @@ Use `# %%` cell-style `.py` in `notebooks/` for exploration; promote stable code
 ## Environment (Milestone 0, M1-aware)
 
 ```yaml
-# env/environment.yml  — keep MRI-Python light; QuPath/Fiji/ABBA are SEPARATE desktop apps
-name: stroke-pipeline
+# env/environment.yml  — reference/export target only; current work uses lys-bbb
+name: lys-bbb
 channels: [conda-forge]
 dependencies:
   - python=3.11
@@ -102,13 +116,17 @@ Because callers depend only on these signatures, the DL upgrade in Milestone 2 c
 
 | Task | Action | Done when |
 |---|---|---|
-| Repo + env | Create repo skeleton above; build `stroke-pipeline` env | `import nibabel, SimpleITK, napari, pandas` all succeed |
-| Pick the test animal | Choose one 24h or 48h animal with clear MRI + both IHC panels | Paths recorded in `config/animals/M07.yml` |
+| Repo + env | Use repo skeleton above with the existing `lys-bbb` env | `import nibabel, SimpleITK, napari, pandas` all succeed |
+| Pick the test animal | Current v1 uses `BD_08_5D`, a 5d stroke animal with MRI + both IHC panels | Paths recorded in `config/animals/BD_08_5D.yml` |
 | MRI header sanity | Load the T2 NIfTI; verify spacing = 0.07×0.07×0.5 mm, orientation | `io.py` prints correct voxel size; a slice renders |
 | Channel map | Open one `.vsi` in QuPath; confirm channel→marker per panel; note NeuroTrace emission | Written into the animal config; FITC-overlap risk noted |
-| Model availability check | Find An et al. 2023 code/weights (GitHub) + Zenodo data; try to run inference once | **Fork:** runs → DL is viable for v2. Doesn't run easily → v1 stays threshold, plan nnU-Net fine-tune later |
+| Model availability check | Later only: find An et al. 2023 code/weights (GitHub) + Zenodo data; try to run inference once | **Not a v1 blocker.** Runs → DL is viable for v2. Doesn't run easily → keep manual-corrected masks and consider nnU-Net fine-tune later |
 
-**Defer:** anti-IgG specificity resolution can run in parallel (it's a wet-lab/records question, not a code blocker) — but it gates *interpretation*, so flag it now.
+**Updated:** anti-IgG specificity is resolved (Paul, 2026-06-17): the secondary
+is anti-human IgG-FITC and LYS241 is humanized Glunomab. Keep IgG-FITC naming
+and provenance flags; remaining IHC gates are threshold calibration and Panel A
+NeuroTrace/FITC spectral bleed-through.
+There is no prior QuPath threshold to reuse; calibration is a v1 task.
 
 ---
 
@@ -118,15 +136,16 @@ Because callers depend only on these signatures, the DL upgrade in Milestone 2 c
 | Task | Action | Output |
 |---|---|---|
 | Preprocess | `preprocess.py`: N4 bias correction + brain mask (Otsu/morphology is fine for v1) | clean volume + mask |
-| Segment (threshold backend) | `segment.py` method='threshold': voxels > contra-mean+k·SD inside ipsi hemisphere; connected components; size filter | draft lesion mask |
-| **✎ Edit** | `edit.py`: open volume+draft in napari (or ITK-SNAP); hand-correct borders; save; log Dice(draft,corrected) | corrected mask + edit record |
+| Segment (threshold backend) | `segment.py` method='threshold': voxels > contra-mean+k·SD inside ipsi hemisphere; connected components; size filter | untrusted draft lesion mask |
+| **✎ Edit** | `edit.py`: open volume+draft in napari (or ITK-SNAP); hand-correct or redraw; save; log Dice(draft,corrected) | authoritative corrected mask + edit record |
 | Volume | `volume.py`: Σ(area)×0.5 mm; raw + per-slice profile | volume number (mm³) |
 
 ### 1B. IHC → basic measurement (~1 day)
 | Task | Action | Output |
 |---|---|---|
 | QuPath project | Create project, import the `.vsi` (Bio-Formats) | openable project |
-| % positive area (no segmentation yet) | `detect_cells.groovy` v1 = simple intensity threshold on FITC → % positive area per whole section; DAPI threshold → rough density | measurement CSV |
+| Calibration | Build an exploratory IgG-FITC threshold helper from controls/image statistics; reviewer signs off before final export | approved threshold provenance |
+| % positive area (no segmentation yet) | `detect_cells.groovy`/export v1 = approved IgG-FITC intensity threshold inside reviewed tissue ROI → % positive area | measurement CSV |
 | Export + ingest | `export_measurements.groovy` → `ingest.py` parses to rows | tidy IHC rows |
 
 > **Why %-area first:** it needs no cell segmentation, so it proves the IHC spine in hours. Cell-level detection is Milestone 2.
@@ -134,7 +153,7 @@ Because callers depend only on these signatures, the DL upgrade in Milestone 2 c
 ### 1C. Glue (~0.5 day)
 | Task | Action | Output |
 |---|---|---|
-| Entry point | `run_animal.py`: read config → run 1A + 1B → write a minimal table | `outputs/M07_v1.csv` |
+| Entry point | `run_animal.py`: read config → run 1A + 1B → write a minimal table | `outputs/BD_08_5D/BD_08_5D_v1.csv` |
 | Minimal table | Columns: animal, timepoint, panel, modality, measure, value, edited, edit_dice | **v1 deliverable** |
 
 **✅ v1 acceptance:** one command on one animal produces a lesion volume (human-corrected) **and** an IHC measurement CSV, joined into one table. No atlas, no regions, no DL required.
@@ -147,14 +166,20 @@ Because callers depend only on these signatures, the DL upgrade in Milestone 2 c
 
 | Task | Action | Replaces |
 |---|---|---|
-| DL lesion backend | Implement `segment.py` method='dl' calling An et al. weights; QC vs ~5 hand masks (Dice) | threshold backend (same signature) |
-| Fork on transfer | Good Dice → adopt DL. Poor → keep threshold for now, schedule nnU-Net fine-tune on accumulated corrected masks | — |
+| DL lesion backend | Implement `segment.py` method='dl' calling An et al. weights; QC vs `3-5` corrected masks before trusting it | threshold backend (same signature) |
+| Fork on transfer | Good Dice → adopt DL as draft backend. Poor → keep manual-corrected masks as truth and fine-tune only after enough masks accumulate | — |
 | Cell detection (DL) | Install StarDist **and** InstanSeg in QuPath; `detect_cells.groovy` → DAPI nuclei + cell expansion; compare counts on one slide | FITC-threshold-only IHC |
 | **✎ Cell edit gate** | Manual add/delete/reclassify on sampled tiles in QuPath; log edit rate | — |
 | Cell-type classify | QuPath trainable object classifier (neuron/endo/astro/microglia); thresholds as sanity check | — |
-| Readouts | Add per-cell LYS241 intensity + %LYS241⁺ per type; keep %-area for LYS241/GFAP/IBA1 | — |
+| Readouts | Add per-cell IgG-FITC intensity + % IgG-FITC-positive per type; keep IgG-FITC/GFAP/IBA1 area fractions | — |
 
 **✅ M2 acceptance:** lesion masks come from DL (or a documented fallback), and IHC yields both object-level (per cell type) and area-level numbers — still on one animal, still no atlas.
+
+Mask-count expectation: one corrected mask is enough to test v1 mechanically;
+`3-5` corrected masks are enough to evaluate a pretrained model; `8-12` can
+support a small transfer-learning attempt; `15-25` is a better fine-tuning
+target. Training from scratch would need substantially more data and is not the
+default plan.
 
 ---
 
@@ -219,11 +244,15 @@ M6 ▓▓▓ (later)  fine-tuning
 ---
 
 ## Decision gates (write the outcome into the config when you hit each)
-1. **End of M0:** does the pretrained lesion model run? → sets whether M1 uses threshold or DL.
-2. **M2:** DL Dice vs manual ≥ your threshold? → adopt DL or stay threshold + queue fine-tuning.
+1. **End of M1:** did one animal run end-to-end with a documented corrected MRI
+   mask? → v1 can proceed even if the draft threshold mask was poor.
+2. **M2:** DL Dice vs manual ≥ your threshold? → adopt DL as the draft backend
+   or keep manual-corrected masks as truth and queue fine-tuning.
 3. **M3:** AIDAmri registration QCs cleanly on a large 5d lesion? → AIDAmri or fall back to ANTs SyN.
 4. **M3:** DeepSlice auto-alignment acceptable on fluorescence/DAPI? → auto+refine or mostly-manual ABBA.
-5. **Anytime:** anti-IgG specificity resolved? → gates whether core LYS241 numbers are interpretable (not whether code runs).
+5. **Anytime:** threshold/spectral gates resolved? → specificity is resolved,
+   but threshold calibration and Panel A NeuroTrace/FITC bleed-through still
+   gate whether IgG-FITC numbers are interpretable.
 
 ---
 

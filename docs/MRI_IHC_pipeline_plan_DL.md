@@ -2,6 +2,11 @@
 
 **Goal.** Same end-to-end workflow as the baseline plan — lesion volume from mouse T2 MRI, multiplexed IHC quantification of LYS241 across cell types, both mapped into the Allen CCFv3, one tidy table — but rebuilt so that **every perception task is a deep-learning model**, and **every model output passes through a human correction gate** before it is trusted. The correction edits are versioned and recycled as training data, so the models improve each protocol (active learning).
 
+**Current status note.** This is not the active v1 implementation plan. v1
+should finish with one animal, no atlas, no DL, and a manually reviewed MRI
+lesion mask. The corrected v1 masks become reference data for this later DL
+track.
+
 **What "deep-learning-first" means here (and what it does *not*).** DL replaces every step that involves *interpreting pixels*: brain extraction, lesion segmentation, cell/nucleus detection, cell-type classification, and section-to-atlas alignment. DL does **not** replace the deterministic steps — physical voxel-volume integration, geometric core/peri/contra construction, midline mirroring, the region/compartment join, and table assembly. Forcing a network onto those would add opacity and error for no gain. So this is *deep-learning-first*, not *deep-learning-only*, and that distinction is deliberate.
 
 ---
@@ -76,7 +81,13 @@ Run **N4 bias correction** (SimpleITK/ANTs) regardless — surface-coil RARE has
 | C. RatLesNetv2 | Rodent T2w CNN | Med (requires training on your own data) | Only if A and B underperform |
 | D. From-scratch | any U-Net | High; needs large n you don't have | Not worth it at your scale |
 
-**Recommended path:** run **A** on every volume → QC against ~5 hand-drawn masks. If Dice is high, you're nearly done. If it drifts, move to **B** (fine-tune nnU-Net on the corrected masks you accumulate — far cheaper than training from scratch). Either way, the output is a *draft* lesion mask.
+**Recommended path:** run **A** on every volume → QC against `3-5` hand-drawn
+masks. If Dice is high, you're nearly done. If it drifts, move to **B** after
+enough corrected masks accumulate. As a practical floor, `8-12` corrected
+stroke masks can support a small transfer-learning attempt; `15-25` is a better
+fine-tuning target. Training from scratch would require substantially more data
+and is not the default plan. Either way, the model output is a *draft* lesion
+mask.
 
 **✎ Human border-correction gate (your explicit step).** Every draft mask is opened in a 3-D label editor; the human refines borders, fills holes, deletes spurious blobs, then saves. Tool options:
 
@@ -111,7 +122,7 @@ Recommendation: classical/AIDAmri stays primary here — lesion-induced deformat
 ## 3. IHC track (deep-learning-first)
 
 ### 3.1 .vsi + channel map (QC gate, unchanged)
-Bio-Formats reads `.vsi` natively in QuPath/Fiji — keep as working format. **Confirm channel→marker map per panel** (Panel A: DAPI/NeuroTrace/Podo/FITC; Panel B: DAPI/IBA1/GFAP/FITC) and **NeuroTrace emission** (green variant bleeds into FITC). **Resolve the anti-IgG specificity confound** (endogenous IgG leakage vs LYS241) before quantifying — DL changes none of this.
+Bio-Formats reads `.vsi` natively in QuPath/Fiji — keep as working format. **Confirm channel→marker map per panel** (Panel A: DAPI/NeuroTrace/Podo/FITC; Panel B: DAPI/IBA1/GFAP/FITC) and **NeuroTrace emission** (green variant bleeds into FITC). Anti-IgG specificity is resolved as anti-human IgG-FITC specific to humanized LYS241. No prior QuPath/IgG-FITC positivity threshold exists for these images, so threshold calibration/review remains a pipeline task. DL changes none of the remaining threshold/spectral QC requirements.
 
 ### 3.2 Section → Allen registration (◆ DL)
 | Option | Flow | Notes |
@@ -143,8 +154,11 @@ Reminder: **GFAP/IBA1 are morphological** → prefer **area-fraction** (intensit
 
 ### 3.5 Readouts (deterministic measurement)
 Same as baseline, both levels, matched to biology:
-- **Object-level**: per-cell-type LYS241 (FITC) mean intensity + % LYS241⁺ of each type; DAPI density (nuclei/mm²).
-- **Area-level**: % positive area for LYS241, GFAP, IBA1 per region×compartment.
+- **Object-level**: per-cell-type IgG-FITC mean intensity + % IgG-FITC-positive
+  of each type; DAPI density (nuclei/mm²). LYS241 association is carried by
+  provenance, not by renaming the measurement.
+- **Area-level**: % positive area for IgG-FITC, GFAP, IBA1 per
+  region×compartment.
 Report both; their disagreement is itself a QC signal.
 
 ### 3.6 Compartments in IHC
@@ -184,7 +198,12 @@ A per-animal YAML config (paths, panel, timepoint, channel map, peri-ring width,
 ---
 
 ## 7. Build order (DL-first, time-boxed)
-**Phase 1 — prove the DL spine on one animal.** MRI: brkraw → N4 → **An et al. inference** → open mask in ITK-SNAP, hand-correct → volume. IHC: one `.vsi` → QuPath → **InstanSeg** on DAPI → manual fix a few tiles → % area + per-cell LYS241. No atlas yet. Mini table. *Confirms the pretrained models transfer to your data before you build anything around them.*
+**Phase 1 — prove the DL spine after v1 exists.** MRI: brkraw → N4 →
+**An et al. inference** → open mask in ITK-SNAP/Slicer/napari, hand-correct →
+volume. IHC: one `.vsi` → QuPath → **InstanSeg** on DAPI → manual fix a few
+tiles → % area + per-cell IgG-FITC/LYS241-associated readout. No atlas yet.
+Mini table. *Confirms whether pretrained models transfer to your data before
+you build anything around them.*
 
 **Phase 2 — atlas on both halves.** AIDAmri (MRI→Allen) + DeepSlice/ABBA (IHC→Allen). Regions enter the table.
 
@@ -198,15 +217,16 @@ Stop where accuracy is good enough for the biology. For a 10-animal exploratory 
 
 ## 8. QC gates
 1. NIfTI header/spacing correct (0.07×0.07×0.5 mm).
-2. Channel map confirmed; NeuroTrace/FITC overlap ruled out.
+2. Channel map confirmed; Panel A NeuroTrace/FITC spectral overlap ruled out.
 3. N4 flattening visibly OK.
-4. Pretrained lesion model QC'd vs ~5 manual masks (Dice) **before** trusting it.
+4. Pretrained lesion model QC'd vs `3-5` corrected manual masks (Dice)
+   **before** trusting it.
 5. **✎ lesion borders reviewed/edited; edit-Dice logged.**
 6. MRI→Allen overlay inspected (esp. large 5d lesions).
 7. DeepSlice/ABBA alignment double-checked on a subset.
 8. Cell detection: InstanSeg vs StarDist agreement on one slide.
 9. **✎ cell detections reviewed/edited on sampled tiles; edit-rate logged.**
-10. anti-IgG specificity resolved.
+10. anti-IgG specificity resolved as anti-human IgG-FITC specific to LYS241.
 11. Object vs area readouts broadly agree.
 12. Model-version + edited-flag present on every output row.
 
@@ -236,9 +256,11 @@ Stop where accuracy is good enough for the biology. For a 10-animal exploratory 
 Being honest so you can defend the choices: **volume integration, geometric compartments, midline mirroring, the region/compartment join, and the table** stay deterministic — they're exact arithmetic/geometry where a network only adds error and opacity. **Atlas registration of lesioned brains** stays classical (SyN/AIDAmri) because learned deformable registration is least reliable exactly where deformation is largest. And **GFAP/IBA1 quantification** stays area-fraction, not cell-DL, because the biology is morphological. "Deep-learning-first" means DL owns every pixel-interpretation task and every one gets a human gate — not that DL is bolted onto steps that don't need it.
 
 ### Open items to finalize (same as baseline)
-1. anti-IgG-FITC specificity to LYS241 (vs endogenous IgG leakage).
-2. NeuroTrace variant/emission (FITC overlap).
-3. Exact `.vsi` channel order per panel.
+1. NeuroTrace variant/emission (Panel A FITC spectral overlap).
+2. Exact `.vsi` channel order per panel for new animals. The current
+   `BD_08_5D` maps are in its animal YAML.
+3. IgG-FITC positivity threshold calibration from configured controls / approved
+   rule. There is no prior QuPath threshold to reuse.
 4. AIDAmri wholesale vs leaner ANTs-only for MRI→Allen.
 5. Péri-lesional ring width.
 6. **Which 3-D mask editor** the lesion reviewer will standardize on (ITK-SNAP / 3D Slicer / Fiji-Labkit / napari).

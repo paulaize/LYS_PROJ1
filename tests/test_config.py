@@ -66,6 +66,21 @@ def test_real_v1_animal_has_confirmed_ihc_channels_but_unset_thresholds():
             cfg.panel_igg_fitc_threshold(panel)
 
 
+def test_real_v1_animal_resolves_anti_human_igg_specificity():
+    cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
+    flags = cfg.animal["interpretation_flags"]
+    assert flags["anti_igg_specificity_resolved"] is True
+    assert flags["fitc_specific_to_lys241"] is True
+    assert flags["specificity_source"] == "confirmed_anti_human_IgG (Paul, 2026-06-17)"
+    assert flags["fitc_igg_specificity"] == "anti_human_confirmed"
+
+
+def test_real_v1_animal_splits_panel_spectral_bleedthrough():
+    cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
+    assert cfg.panel_config("A")["fitc_spectral_bleedthrough"] == "pending_neurotrace_emission"
+    assert cfg.panel_config("B")["fitc_spectral_bleedthrough"] == "none"
+
+
 def test_real_v1_animal_records_qupath_series_layout():
     cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
     qupath = cfg.animal["ihc"]["qupath"]

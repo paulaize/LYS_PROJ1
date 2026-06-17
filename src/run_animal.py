@@ -62,6 +62,7 @@ def run_mri(cfg, *, allow_mask_editor: bool = True) -> dict | None:
         reference_img=img,
         reviewer=cfg.reviewer,
         allow_gui=allow_mask_editor,
+        spacing_mm=spacing,
     )
     corrected_path = work / "lesion_corrected.nii.gz"
     corrected = (
@@ -126,7 +127,51 @@ V1_COLUMNS = [
     "reviewer",
     "qc_flag",
     "model_version",
+    "anti_igg_specificity_resolved",
+    "fitc_specific_to_lys241",
+    "fitc_specificity_source",
+    "fitc_igg_specificity",
+    "fitc_spectral_bleedthrough",
 ]
+
+
+def _bool_csv(value) -> str:
+    if value is None:
+        return ""
+    return str(bool(value))
+
+
+def _append_qc_flag(existing: str, flag: str | None) -> str:
+    if not flag:
+        return existing
+    if not existing:
+        return flag
+    parts = [p for p in str(existing).split(";") if p]
+    return existing if flag in parts else f"{existing};{flag}"
+
+
+def _ihc_interpretation_fields(cfg, panel: str) -> dict:
+    flags = cfg.animal.get("interpretation_flags", {})
+    panel_cfg = cfg.panel_config(panel) if panel else {}
+    return {
+        "anti_igg_specificity_resolved": _bool_csv(
+            flags.get("anti_igg_specificity_resolved")
+        ),
+        "fitc_specific_to_lys241": _bool_csv(flags.get("fitc_specific_to_lys241")),
+        "fitc_specificity_source": flags.get("specificity_source", ""),
+        "fitc_igg_specificity": flags.get("fitc_igg_specificity", ""),
+        "fitc_spectral_bleedthrough": panel_cfg.get("fitc_spectral_bleedthrough", ""),
+    }
+
+
+def _ihc_qc_flag(cfg, row: dict) -> str:
+    qc = str(row.get("qc_flag", ""))
+    if row.get("measure") == "igg_fitc_pct_positive_area":
+        panel = str(row.get("panel", ""))
+        spectral = cfg.panel_config(panel).get("fitc_spectral_bleedthrough", "") if panel else ""
+        if spectral and spectral != "none":
+            qc = _append_qc_flag(qc, f"fitc_spectral_bleedthrough_{spectral}")
+    return qc
 
 
 def write_minimal_table(cfg, mri: dict | None, ihc_rows: list[dict]) -> Path:
@@ -163,10 +208,11 @@ def write_minimal_table(cfg, mri: dict | None, ihc_rows: list[dict]) -> Path:
                     }
                 )
         for r in ihc_rows:
+            panel = r.get("panel", "")
             w.writerow(
                 {
                     **base,
-                    "panel": r.get("panel", ""),
+                    "panel": panel,
                     "modality": "IHC",
                     "region": r.get("region", "whole_section"),
                     "cell_type": r.get("cell_type", ""),
@@ -178,7 +224,8 @@ def write_minimal_table(cfg, mri: dict | None, ihc_rows: list[dict]) -> Path:
                     "edited": "",
                     "edit_dice": "",
                     "reviewer": "",
-                    "qc_flag": r.get("qc_flag", ""),
+                    "qc_flag": _ihc_qc_flag(cfg, r),
+                    **_ihc_interpretation_fields(cfg, panel),
                 }
             )
     print(f"[{cfg.animal_id}] wrote {out}")

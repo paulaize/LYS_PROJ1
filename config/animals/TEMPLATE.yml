@@ -31,6 +31,7 @@ ihc:
       neurotrace_emission: null
       igg_fitc_channel_index: null
       igg_fitc_positive_threshold: null  # TODO: tune/confirm; overrides global if set
+      fitc_spectral_bleedthrough: null   # Panel A: pending until NeuroTrace emission is confirmed
     B:
       vsi_dir: null
       vsi_files: []
@@ -42,8 +43,10 @@ ihc:
         3: null                # e.g. "IgG-FITC"
       igg_fitc_channel_index: null
       igg_fitc_positive_threshold: null
+      fitc_spectral_bleedthrough: null
 
 interpretation_flags:
-  anti_igg_specificity_resolved: false
+  anti_igg_specificity_resolved: null
   fitc_specific_to_lys241: null # true/false/null. Null means interpretation unresolved.
-  fitc_overlap_risk: null       # e.g. "unknown", "green_neurotrace_overlap", "low"
+  specificity_source: null
+  fitc_igg_specificity: null    # e.g. "anti_human_confirmed"

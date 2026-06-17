@@ -72,5 +72,5 @@ compartments:
 
 qc:
   require_human_mask_review: true
-  flag_core_igg_fitc_confounded: true
+  flag_core_igg_fitc_confounded: false
   small_24h_lesion_warning_mm3: 6.0

@@ -70,6 +70,7 @@ ihc:
       neurotrace_emission_confirmed: false
       igg_fitc_channel_index: 1
       igg_fitc_positive_threshold: null
+      fitc_spectral_bleedthrough: "pending_neurotrace_emission"
     B:
       vsi_dir: "data/5D/IHC/panel_B"
       vsi_files:
@@ -87,13 +88,15 @@ ihc:
         3: "C4 CY5"
       igg_fitc_channel_index: 1
       igg_fitc_positive_threshold: null
+      fitc_spectral_bleedthrough: "none"
 
 interpretation_flags:
-  anti_igg_specificity_resolved: false
-  fitc_specific_to_lys241: null
-  fitc_overlap_risk: "unresolved_neurotrace_deep_red_not_control_verified"
+  anti_igg_specificity_resolved: true
+  fitc_specific_to_lys241: true
+  specificity_source: "confirmed_anti_human_IgG (Paul, 2026-06-17)"
+  fitc_igg_specificity: "anti_human_confirmed"
   anti_igg_specificity_note: >
-    LYS241 is described as the humanized version of Glunomab. If the secondary
-    reagent is confirmed as anti-human IgG-FITC, signal should preferentially
-    bind LYS241 rather than endogenous mouse IgG. Keep unresolved until the
-    actual secondary reagent species/isotype/catalog is confirmed.
+    The anti-IgG-FITC secondary is confirmed as anti-human IgG. LYS241 is
+    humanized Glunomab, so this secondary targets LYS241 and does not bind
+    endogenous mouse IgG. This resolves the biological endogenous-IgG leakage
+    confound, but not the positivity threshold or Panel A spectral bleed-through.
