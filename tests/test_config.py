@@ -57,10 +57,29 @@ def test_real_v1_animal_config_records_raw_and_derived_mri_paths():
     assert cfg.t2_nifti == REPO / "work/BD_08_5D/mri/t2_scan2.nii.gz"
 
 
-def test_real_v1_animal_does_not_guess_ihc_channels_or_thresholds():
+def test_real_v1_animal_has_confirmed_ihc_channels_but_unset_thresholds():
     cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
     for panel in ("A", "B"):
-        with pytest.raises(ValueError):
-            cfg.panel_igg_fitc_channel_index(panel)
+        assert cfg.panel_igg_fitc_channel_index(panel) == 1
         with pytest.raises(ValueError):
             cfg.panel_igg_fitc_threshold(panel)
+
+
+def test_real_v1_animal_records_qupath_series_layout():
+    cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
+    qupath = cfg.animal["ihc"]["qupath"]
+    assert qupath["tissue_annotation_name"] == "tissue_v1"
+    assert qupath["combined_csv_mode"] == "overwrite"
+    assert qupath["label_series_index"] == 0
+    assert qupath["overview_series_index"] == 1
+    assert qupath["section_series_indices"] == [2, 3, 4, 5, 6, 7, 8, 9]
+    assert qupath["slide_row_major_section_ids"] == [
+        "section_04",
+        "section_03",
+        "section_02",
+        "section_01",
+        "section_08",
+        "section_07",
+        "section_06",
+        "section_05",
+    ]

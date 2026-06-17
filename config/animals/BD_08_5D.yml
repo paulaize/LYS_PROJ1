@@ -19,6 +19,37 @@ mri:
   lesion_side: null
 
 ihc:
+  qupath:
+    tissue_annotation_name: "tissue_v1"
+    combined_csv_mode: "overwrite"
+    series_index_base: 0
+    label_series_index: 0
+    overview_series_index: 1
+    section_series_indices: [2, 3, 4, 5, 6, 7, 8, 9]
+    section_ids_by_series_index:
+      2: "section_01"
+      3: "section_02"
+      4: "section_03"
+      5: "section_04"
+      6: "section_05"
+      7: "section_06"
+      8: "section_07"
+      9: "section_08"
+    slide_row_major_section_ids:
+      - "section_04"
+      - "section_03"
+      - "section_02"
+      - "section_01"
+      - "section_08"
+      - "section_07"
+      - "section_06"
+      - "section_05"
+    section_selection_policy: "manual_qc_select_best_sections"
+    notes: >
+      Each VSI has 10 QuPath/Bio-Formats images: label, whole-slide overview,
+      then 8 separate 10 um brain-section images. Process section series only.
+      Sections can be filtered later for tears/folds before quantification.
+  igg_fitc_threshold_status: "pending_vehicle_control_calibration"
   panels:
     A:
       vsi_dir: "data/5D/IHC/panel_A"
@@ -26,12 +57,18 @@ ihc:
         - "data/5D/IHC/panel_A/BD_08_5D Podo NeuroT IgG___01.vsi"
       overview_vsi: null
       channel_map:
-        0: null
-        1: null
-        2: null
-        3: null
-      neurotrace_emission: null
-      igg_fitc_channel_index: null
+        0: "DAPI"
+        1: "IgG-FITC"
+        2: "Podocalyxin"
+        3: "NeuroTrace"
+      raw_channel_names:
+        0: "C1 DAPI"
+        1: "C2 FITC"
+        2: "C3 CY3"
+        3: "C4 CY5"
+      neurotrace_emission: "640/660 Deep-Red Fluorescent Nissl Stain"
+      neurotrace_emission_confirmed: false
+      igg_fitc_channel_index: 1
       igg_fitc_positive_threshold: null
     B:
       vsi_dir: "data/5D/IHC/panel_B"
@@ -39,14 +76,24 @@ ihc:
         - "data/5D/IHC/panel_B/BD_08_5D IBA1 GFAP IgG_01.vsi"
       overview_vsi: null
       channel_map:
-        0: null
-        1: null
-        2: null
-        3: null
-      igg_fitc_channel_index: null
+        0: "DAPI"
+        1: "IgG-FITC"
+        2: "GFAP"
+        3: "IBA1"
+      raw_channel_names:
+        0: "C1 DAPI"
+        1: "C2 FITC"
+        2: "C3 CY3"
+        3: "C4 CY5"
+      igg_fitc_channel_index: 1
       igg_fitc_positive_threshold: null
 
 interpretation_flags:
   anti_igg_specificity_resolved: false
   fitc_specific_to_lys241: null
-  fitc_overlap_risk: null
+  fitc_overlap_risk: "unresolved_neurotrace_deep_red_not_control_verified"
+  anti_igg_specificity_note: >
+    LYS241 is described as the humanized version of Glunomab. If the secondary
+    reagent is confirmed as anti-human IgG-FITC, signal should preferentially
+    bind LYS241 rather than endogenous mouse IgG. Keep unresolved until the
+    actual secondary reagent species/isotype/catalog is confirmed.

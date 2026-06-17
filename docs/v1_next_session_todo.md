@@ -36,21 +36,27 @@ Do not guess these values in code or config.
   `work/BD_08_5D/mri/t2_scan2.nii.gz`.
 - [x] Record the available top-level `.vsi` paths for Panel A and Panel B in
   `config/animals/BD_08_5D.yml`.
-- [ ] Confirm how QuPath/Bio-Formats exposes the 8 sections/series inside each
-  `.vsi`, and whether the v1 export should run once per top-level file or once
-  per series/section.
-- [ ] Confirm the exact zero-based channel map and IgG-FITC channel index for
+- [x] Confirm how QuPath/Bio-Formats exposes the 8 sections/series inside each
+  `.vsi`: each file has 10 images/series: label, whole-slide overview, then 8
+  section series. v1 should process section series only, with later manual
+  selection/QC for tears and folds.
+- [x] Confirm the exact zero-based channel map and IgG-FITC channel index for
   each panel in QuPath/Bio-Formats.
-- [ ] Identify the NeuroTrace product/catalog number and emission. Record
-  whether a NeuroTrace-only control produces signal in the FITC channel.
+- [ ] Identify the NeuroTrace product/catalog number and emission. Current
+  working note: likely `640/660 Deep-Red Fluorescent Nissl Stain`; still needs
+  product/catalog confirmation and/or a NeuroTrace-only FITC bleed-through
+  control.
 - [ ] Resolve what the anti-IgG-FITC reagent binds and whether it detects
-  endogenous mouse IgG. Record the result in the interpretation flags.
+  endogenous mouse IgG. Current working note: LYS241 is humanized Glunomab, so
+  an anti-human IgG-FITC secondary should preferentially detect LYS241 rather
+  than endogenous mouse IgG, but the actual secondary reagent must be confirmed.
 - [ ] Tune and approve the IgG-FITC positive threshold for each panel or
   acquisition batch using negative and positive controls.
 - [ ] Draw/review a reference MRI lesion mask and tune MRI threshold `k`.
   `k: 2.5` may be used only as a provisional first technical run.
-- [ ] Confirm napari as the standardized v1 MRI mask editor, or select an
-  alternative.
+- [x] Confirm napari as the initial v1 MRI mask editor. Keep the interface open
+  to later switch to ITK-SNAP / 3D Slicer, and keep 3D Slicer + MONAI Label in
+  mind for a later improved annotation workflow.
 
 ## Next programming session
 
@@ -72,16 +78,18 @@ The current exporter is preliminary: it counts the full rectangular image,
 including off-tissue background. The annotation created by
 `detect_cells.groovy` is not used by the exporter.
 
-- [ ] Confirm whether the configured Panel A/B `.vsi` files contain all
+- [x] Confirm whether the configured Panel A/B `.vsi` files contain all
   section series and decide the exact QuPath export iteration unit.
-- [ ] Standardize a manually reviewed whole-tissue annotation for v1. Do not
+- [x] Standardize a manually reviewed whole-tissue annotation for v1. Do not
   invent an automatic tissue threshold.
+  Annotation name: `tissue_v1`.
 - [ ] Update `export_measurements.groovy` to require and measure only the
   reviewed tissue annotation, excluding off-tissue background.
 - [ ] Calculate `total_area_um2` from the measured tissue ROI, not the full
   image rectangle.
 - [ ] Fail helpfully when the tissue annotation, pixel calibration, confirmed
   channel index, or approved threshold is missing.
+- [x] Decide duplicate-row behavior: overwrite combined CSV for v1.
 - [ ] Prevent duplicate rows when a section is re-exported, or make overwrite
   behavior explicit and deterministic.
 - [ ] Record the image/section identifier, panel, channel index, threshold,
@@ -93,7 +101,8 @@ including off-tissue background. The annotation created by
 
 - [ ] Add a small QuPath orchestration command/script that reads one animal
   YAML and runs all configured Panel A and Panel B sections with their confirmed
-  indexes and thresholds.
+  indexes and thresholds. It must skip label/overview series and iterate only
+  section series `2..9` for `BD_08_5D`.
 - [ ] Write one deterministic combined IHC CSV under `work/<animal_id>/`.
 - [ ] Carry `anti_igg_specificity_resolved`, `fitc_specific_to_lys241`, and
   `fitc_overlap_risk` into the final joined output or an attached provenance
@@ -101,6 +110,8 @@ including off-tissue background. The annotation created by
 - [ ] Ensure unresolved specificity/overlap produces a clear QC flag rather
   than being treated as resolved.
 - [ ] Add tests for the new provenance and config-validation behavior.
+- [ ] Add threshold-calibration workflow or helper using vehicle/control images;
+  do not hardcode a provisional analysis threshold as final data.
 
 ### P1: validate the MRI path on the real test animal
 
