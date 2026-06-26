@@ -1,0 +1,31 @@
+# RatLesNetV2 dataset-preparation template.
+#
+# Outputs are generated training folders under work/ and are safe to delete.
+# Source scan/mask paths may point to data/ or work/, but they are never edited.
+
+dataset_name: "LYS_T2w_manual_v0"
+output_root: "work/ratlesnetv2_finetune/datasets"
+
+preprocessing:
+  expected_spacing_mm: [0.07, 0.07, 0.5]
+  spacing_tolerance_mm: 0.02
+  label_threshold: 0.5
+
+ratlesnetv2:
+  scan_filename: "scan.nii.gz"
+  # Current upstream DataWrapper.py uses scan_lesionIAM.nii.gz, despite README text.
+  label_filename: "scan_lesionIAM.nii.gz"
+  # Also write scan_lesion.nii.gz for README compatibility and easier inspection.
+  write_readme_label_alias: true
+
+splits:
+  train:
+    - animal_id: "BD_08_5D"
+      study: "LYS"
+      timepoint: "5d"
+      case_id: "BD_08_5D"
+      scan_nifti: "work/BD_08_5D/mri/t2_scan2.nii.gz"
+      lesion_mask: "work/BD_08_5D/lesion_corrected.nii.gz"
+  validation: []
+  test: []
+

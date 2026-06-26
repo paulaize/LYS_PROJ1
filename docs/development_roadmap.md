@@ -82,11 +82,10 @@ dependencies:
   - pip: [paquo]         # touch QuPath projects from Python
 ```
 
-Separate, heavier env only when you add the DL lesion model (PyTorch with **MPS** for M1 GPU; keep it isolated to avoid breaking `antspyx`):
-```bash
-conda create -n stroke-dl python=3.11 pytorch torchvision -c pytorch
-# + the An et al. / nnU-Net package once you confirm it runs
-```
+DL training is not a local v1 requirement. For the RatLesNetV2 branch, keep the
+local `lys-bbb` env for dataset preparation/tests and run actual training on a
+cloud GPU runtime. If PyTorch is ever used locally on Apple Silicon, use MPS
+when available rather than CUDA.
 Desktop apps installed separately (not conda): **QuPath** (+ InstanSeg & StarDist extensions), **Fiji** (+ ABBA), and **ITK-SNAP** or **3D Slicer** for 3-D mask editing.
 
 > **Setup checkpoint:** confirm `antspyx` imports on arm64 and `napari` opens. If `antspyx` fights you on M1, defer it — it's only needed at Milestone 3, not for v1.
@@ -121,6 +120,7 @@ Because callers depend only on these signatures, the DL upgrade in Milestone 2 c
 | MRI header sanity | Load the T2 NIfTI; verify spacing = 0.07×0.07×0.5 mm, orientation | `io.py` prints correct voxel size; a slice renders |
 | Channel map | Open one `.vsi` in QuPath; confirm channel→marker per panel; record NeuroTrace emission | Written into the animal config; Panel A NeuroTrace accepted as 640/660 deep-red for v1 |
 | Model availability check | Later only: find An et al. 2023 code/weights (GitHub) + Zenodo data; try to run inference once | **Not a v1 blocker.** Runs → DL is viable for v2. Doesn't run easily → keep manual-corrected masks and consider nnU-Net fine-tune later |
+| RatLesNetV2 branch setup | `dl-ratlesnetv2-finetune`: prepare corrected T2w/manual-mask folders for upstream RatLesNetV2 and print cloud finetuning commands | Independent DL track exists without changing v1 |
 
 **Updated:** anti-IgG specificity is resolved (Paul, 2026-06-17): the secondary
 is anti-human IgG-FITC and LYS241 is humanized Glunomab. Keep IgG-FITC naming
@@ -180,6 +180,11 @@ Mask-count expectation: one corrected mask is enough to test v1 mechanically;
 support a small transfer-learning attempt; `15-25` is a better fine-tuning
 target. Training from scratch would need substantially more data and is not the
 default plan.
+
+RatLesNetV2-specific note: the branch `dl-ratlesnetv2-finetune` contains local
+dataset conversion and a cloud-oriented finetuning loop, but predictions from
+that model are still drafts. They become scientific data only after the same
+manual correction/provenance path used by v1.
 
 ---
 

@@ -81,6 +81,13 @@ Run **N4 bias correction** (SimpleITK/ANTs) regardless — surface-coil RARE has
 | C. RatLesNetv2 | Rodent T2w CNN | Med (requires training on your own data) | Only if A and B underperform |
 | D. From-scratch | any U-Net | High; needs large n you don't have | Not worth it at your scale |
 
+**RatLesNetV2 branch status.** Branch `dl-ratlesnetv2-finetune` now contains a
+separate `ratlesnetv2_finetune/` folder for preparing reviewed LYS T2w masks in
+the upstream RatLesNetV2 data format and for running a cloud finetuning script.
+It is not a v1 backend. It consumes human-corrected masks from v1/later review
+passes and produces draft DL masks that must return through the same human
+review gate before volume calculations.
+
 **Recommended path:** run **A** on every volume → QC against `3-5` hand-drawn
 masks. If Dice is high, you're nearly done. If it drifts, move to **B** after
 enough corrected masks accumulate. As a practical floor, `8-12` corrected
@@ -218,6 +225,13 @@ you build anything around them.*
 **Phase 3 — compartments + edema + join + provenance.** Core/peri/contra, Swanson correction, MRI→IHC compartment transfer, the join, edit-logging columns.
 
 **Phase 4 — close the active-learning loop.** Fine-tune nnU-Net + StarDist/InstanSeg on the corrected masks/cells from Phases 1–3; batch all animals; YAML configs; QC dashboards. This is where the DL investment compounds for the *next* protocol.
+
+**RatLesNetV2 transfer-learning branch.** In parallel with the above, use
+`ratlesnetv2_finetune/` to convert corrected T2w masks to the RatLesNetV2
+folder contract and run cloud smoke tests. This is useful for evaluating
+whether RatLesNetV2 transfers to the LYS thrombin/surface-coil data, but it
+does not change the v1 rule that the corrected human mask is the source of
+truth.
 
 Stop where accuracy is good enough for the biology. For a 10-animal exploratory study, Phases 1–3 with solid correction gates are likely the right stopping point; Phase 4 is the payoff when this becomes a recurring assay.
 

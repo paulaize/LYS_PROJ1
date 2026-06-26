@@ -26,6 +26,16 @@ Atlas registration, DL models, compartments, cell-level detection, and batch pro
 For the current audited blockers and the exact next programming-session order,
 read [`docs/v1_next_session_todo.md`](docs/v1_next_session_todo.md).
 
+## RatLesNetV2 finetuning branch
+
+Branch `dl-ratlesnetv2-finetune` starts a separate MRI lesion deep-learning
+track for RatLesNetV2 transfer learning. It is cloud-oriented: local code
+prepares and validates NIfTI/manual-mask datasets, while actual finetuning runs
+on a GPU runtime such as Google Colab.
+
+See [`ratlesnetv2_finetune/README.md`](ratlesnetv2_finetune/README.md) and
+[`docs/ratlesnetv2_finetuning_branch.md`](docs/ratlesnetv2_finetuning_branch.md).
+
 ## Use your existing conda env
 
 This starter is configured for Paul’s existing environment:
@@ -176,6 +186,20 @@ Only after the target/control one-section smoke test succeeds and the best
 sections have been selected should you scale up. Do not use the old
 `downsample=8.0` command for exploratory sweeps; the v1 config uses
 `ihc.threshold_calibration.downsample=32.0` for this first pass.
+
+## RatLesNetV2 local commands
+
+Prepare a local RatLesNetV2 dataset from reviewed T2w masks:
+
+```bash
+make ratlesnetv2-prepare RATLESNET_CONFIG=ratlesnetv2_finetune/configs/dataset_template.yml
+```
+
+Print cloud/Colab commands for the prepared dataset:
+
+```bash
+make ratlesnetv2-cloud-plan RATLESNET_CONFIG=ratlesnetv2_finetune/configs/dataset_template.yml
+```
 
 Then scale up to the chosen sections, or to the whole panel if needed:
 

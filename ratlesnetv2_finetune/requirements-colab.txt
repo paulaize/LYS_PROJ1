@@ -1,0 +1,10 @@
+# Colab/cloud requirements for the RatLesNetV2 branch.
+# Google Colab usually already provides torch; keeping it here makes the runtime explicit.
+torch
+nibabel
+numpy
+scipy
+scikit-image
+pyyaml
+pandas
+
