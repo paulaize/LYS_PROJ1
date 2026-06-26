@@ -47,8 +47,7 @@ def check_header(img: nib.Nifti1Image,
             "Check the brkraw conversion / reorientation, or update "
             "config/pipeline.yml:mri.expected_spacing_mm if this is intended."
         )
-    return spacing
-
+    return spacing    
 
 def save_mask(mask: np.ndarray,
               reference: nib.Nifti1Image,

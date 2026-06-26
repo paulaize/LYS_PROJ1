@@ -124,9 +124,11 @@ Because callers depend only on these signatures, the DL upgrade in Milestone 2 c
 
 **Updated:** anti-IgG specificity is resolved (Paul, 2026-06-17): the secondary
 is anti-human IgG-FITC and LYS241 is humanized Glunomab. Keep IgG-FITC naming
-and provenance flags; remaining IHC gates are threshold calibration and Panel A
-NeuroTrace/FITC spectral bleed-through.
-There is no prior QuPath threshold to reuse; calibration is a v1 task.
+and provenance flags. For the current v1 configured panels, spectral
+bleed-through is recorded as resolved/none where confirmed; future animals or
+panels still require their own spectral provenance. The remaining active IHC
+v1 gate is IgG-FITC threshold calibration and reviewer sign-off. There is no
+prior QuPath threshold to reuse; calibration is a v1 task.
 
 ---
 

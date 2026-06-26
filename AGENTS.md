@@ -114,6 +114,20 @@ External apps are not Python packages:
 5. Scan/channel/path facts come from YAML config. Never hardcode `.vsi` channel order, scan paths, or absolute user paths.
 6. Fail loudly on bad assumptions, especially wrong voxel spacing, missing channel maps, unknown thresholds, or missing reviewer/QC provenance.
 
+### Large IHC file policy
+
+- Raw `.vsi` files are large whole-slide inputs and must remain in their
+  original read-only location, usually `data/` or an external `/Volumes/...`
+  drive.
+- Do not copy, rewrite, or convert full `.vsi` files into TIFF/OME-TIFF as part
+  of the default workflow unless Paul explicitly asks.
+- IHC code should process one animal, panel, section, or tile at a time rather
+  than loading whole panels or whole batches into memory.
+- Use downsampled pyramid levels for diagnostics, threshold-review thumbnails,
+  and visual QC whenever full resolution is not required.
+- Temporary caches must be written under `work/<animal_id>/`, be rebuildable,
+  and be safe to delete. Final deliverables belong under `outputs/`.
+
 ---
 
 ## 5. Domain facts that must not be invented

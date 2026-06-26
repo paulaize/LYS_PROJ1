@@ -130,10 +130,16 @@ Output: a per-animal label image (0=other,1=core,2=peri,3=contra-core,4=contra-p
 
 ### 3.1 .vsi handling + channel map (first QC gate)
 - Each `.vsi`: Olympus VS-series, fluorescence, uint16, 20×, **0.325 µm/px**, pyramidal, ~3 GB, **4 channels (CZT 4×1×1)**, 8 sections/animal/panel + 1 overview. Bio-Formats reads these natively in QuPath and Fiji — no conversion needed; **keep `.vsi` as the working format** so collaborators open them as usual.
+- **Large-file handling:** raw `.vsi` files should normally remain on the
+  external drive or read-only data folder. Store paths in YAML, read only the
+  required series/sections/tiles or downsampled pyramid levels, and write
+  derived CSVs, thumbnails, overlays, annotations, manifests, and logs under
+  `work/` and `outputs/`. Full-slide converted copies are not part of the
+  default workflow.
 - **Required before anything:** a definitive **channel → marker table per panel.**
   - Panel A (10 slides): DAPI, **NeuroTrace** (neurons), **Podocalyxin** (endothelium), **IgG-FITC** readout, interpreted as LYS241-associated through provenance.
   - Panel B (10 slides): DAPI, **IBA1** (microglia), **GFAP** (astrocytes), **IgG-FITC** readout, interpreted as LYS241-associated through provenance.
-  - Record each fluorophore's **emission**. NeuroTrace ships in blue/green/red/deep-red variants; if you're running the **green** NeuroTrace it overlaps FITC and will contaminate the IgG-FITC channel — confirm it's a non-green variant, or plan spectral unmixing.
+  - Record each fluorophore's **emission** per animal/panel. For the current v1 configured Panel A, NeuroTrace is accepted as 640/660 deep-red, so FITC bleed-through is not flagged for v1. Future animals or panel changes stillrequire spectral provenance rather than assuming the same result.
 - **Specificity flag (resolved 2026-06-17):** Paul confirmed the secondary is **anti-human IgG-FITC**. LYS241 is humanized Glunomab, so the FITC readout is specific to LYS241 and does not bind endogenous mouse IgG. Keep the measured variable named **IgG-FITC** / `igg_fitc_*`; the LYS241 interpretation lives in provenance flags. This does not set the positivity threshold.
 - **Threshold flag (open):** these images have not previously been quantified
   in QuPath, and no one on the team has an existing threshold to supply. QuPath
@@ -141,6 +147,11 @@ Output: a per-animal label image (0=other,1=core,2=peri,3=contra-core,4=contra-p
   scientifically valid automatic threshold. The pipeline should generate
   candidate thresholds from controls or documented image statistics, then store
   the approved threshold and reviewer provenance before final export.
+
+**v1 implementation note:** QuPath is the scripted IHC backend and review
+surface for `tissue_v1` and threshold artifacts. Python orchestrates QuPath,
+ingests exported CSVs, validates provenance, and joins outputs. v1 should not
+attempt to replace QuPath/Bio-Formats with a custom Python `.vsi` reader.
 
 ### 3.2 Section → Allen registration with ABBA — options
 
@@ -265,7 +276,7 @@ This satisfies "automate where accuracy allows, but they still open images in th
 1. **Header/spacing** correct on every NIfTI (voxel = 0.07×0.07×0.5 mm).
 2. **Channel map** confirmed per panel; Panel A NeuroTrace-vs-FITC spectral overlap ruled out.
 3. **Bias correction** visibly flattened before thresholding.
-4. **Lesion mask** reviewed in Fiji (over/under-segmentation, hemorrhage exclusion).
+4. **Lesion mask** reviewed in the configured mask editor: ITK-SNAP.
 5. **MRI→Allen** registration overlay inspected (esp. large 5d lesions).
 6. **ABBA** alignment double-checked on a subset.
 7. **Cell detection** count sanity (InstanSeg vs StarDist agreement on one slide).

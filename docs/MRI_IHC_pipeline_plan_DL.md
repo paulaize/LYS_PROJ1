@@ -7,6 +7,12 @@ should finish with one animal, no atlas, no DL, and a manually reviewed MRI
 lesion mask. The corrected v1 masks become reference data for this later DL
 track.
 
+**Implementation guardrail for Codex:** do not implement tasks from this DL plan
+unless `docs/v1_next_session_todo.md` or `docs/development_roadmap.md`
+explicitly activates the corresponding milestone. During v1, this document is
+reference-only; the active implementation remains one animal, no atlas, no DL,
+no compartments, and no batch processing.
+
 **What "deep-learning-first" means here (and what it does *not*).** DL replaces every step that involves *interpreting pixels*: brain extraction, lesion segmentation, cell/nucleus detection, cell-type classification, and section-to-atlas alignment. DL does **not** replace the deterministic steps — physical voxel-volume integration, geometric core/peri/contra construction, midline mirroring, the region/compartment join, and table assembly. Forcing a network onto those would add opacity and error for no gain. So this is *deep-learning-first*, not *deep-learning-only*, and that distinction is deliberate.
 
 ---
