@@ -290,7 +290,11 @@ MRI→Allen via AIDAmri; IHC→Allen via ABBA+DeepSlice. Now regions appear in t
 Core/peri/contra masks, Swanson correction, MRI→IHC compartment transfer, the relational join, the full tidy table.
 
 **Phase 4 — robustness + reuse.**
-Swap threshold→trained classifier; batch all animals; YAML configs; QC logging; overlay figures. Only now consider deep-learning lesion seg if scale justifies it.
+Swap threshold→trained classifier; batch all animals; YAML configs; QC logging;
+overlay figures. Only now consider deep-learning lesion segmentation if scale
+justifies it. The current RatLesNetV2 transfer-learning notes, public mouse
+dataset overlap rules, and geometry summary live in
+`docs/ratlesnetv2_external_datasets.md`.
 
 Stop at the phase where accuracy is "good enough for the biology" — for a 10-animal exploratory drug-distribution study, Phase 3 with solid QC is likely the right stopping point, with Phase 4 reserved for when this becomes a recurring assay.
 
@@ -310,7 +314,7 @@ Stop at the phase where accuracy is "good enough for the biology" — for a 10-a
 | Orchestration | Python (`pathlib`, pandas, PyYAML), `paquo`, `subprocess`→QuPath/Fiji headless | glue + table |
 | Stats (downstream) | R | mixed models, plots |
 
-**Key references:** Drieu et al. 2020 (thrombin model); AIDAmri (Pallast et al., *Front. Neuroinform.* 2019); Koch et al. 2019 (atlas edema-corrected lesion volume); ABBA+BraiAn (Chiaruttini et al., *Cell Reports* 2025); DeepSlice (Carey et al., *Nat. Commun.* 2023); InstanSeg (Goldsborough et al. 2024); StarDist (Schmidt et al. 2018); QuPath (Bankhead et al. 2017).
+**Key references:** Drieu et al. 2020 (thrombin model); AIDAmri (Pallast et al., *Front. Neuroinform.* 2019); Koch et al. 2019 (atlas edema-corrected lesion volume); ABBA+BraiAn (Chiaruttini et al., *Cell Reports* 2025); DeepSlice (Carey et al., *Nat. Commun.* 2023); InstanSeg (Goldsborough et al. 2024); StarDist (Schmidt et al. 2018); QuPath (Bankhead et al. 2017). For RatLesNetV2/public mouse lesion training data, see `docs/ratlesnetv2_external_datasets.md`.
 
 ---
 

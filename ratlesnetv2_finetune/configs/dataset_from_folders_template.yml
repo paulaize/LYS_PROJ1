@@ -1,0 +1,25 @@
+# RatLesNetV2 folder-import dataset plan.
+#
+# Copy this file to ratlesnetv2_finetune/configs/local_dataset.yml before
+# adding local source folders. local_*.yml files are gitignored because they
+# may contain absolute paths on Paul's machine.
+
+dataset_name: "LYS_T2w_manual_v0"
+output_root: "work/ratlesnetv2_finetune/datasets"
+
+preprocessing:
+  expected_spacing_mm: [0.07, 0.07, 0.5]
+  spacing_tolerance_mm: 0.02
+  label_threshold: 0.5
+
+ratlesnetv2:
+  scan_filename: "scan.nii.gz"
+  # Current upstream DataWrapper.py uses scan_lesionIAM.nii.gz, despite README text.
+  label_filename: "scan_lesionIAM.nii.gz"
+  # Also write scan_lesion.nii.gz for README compatibility and easier inspection.
+  write_readme_label_alias: true
+
+splits:
+  train: []
+  validation: []
+  test: []

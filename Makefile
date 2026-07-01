@@ -4,7 +4,7 @@ IHC ?=
 RUN_ARGS ?=
 RATLESNET_CONFIG ?= ratlesnetv2_finetune/configs/dataset_template.yml
 
-.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-threshold-sweeps ratlesnetv2-prepare ratlesnetv2-cloud-plan run clean
+.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-threshold-sweeps ratlesnetv2-roiset-to-mask ratlesnetv2-add-source ratlesnetv2-download-external ratlesnetv2-orient-external-lsp ratlesnetv2-flip-external-si ratlesnetv2-prepare-lys-roisets ratlesnetv2-prepare ratlesnetv2-cloud-plan run clean
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
@@ -26,6 +26,24 @@ ihc-diagnose:
 
 ihc-threshold-sweeps:
 	conda run -n $(ENV) python scripts/run_ihc_threshold_sweeps.py --config $(CONFIG) $(RUN_ARGS)
+
+ratlesnetv2-roiset-to-mask:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.roiset_to_nifti_mask $(RUN_ARGS)
+
+ratlesnetv2-add-source:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.add_source_folder --config $(RATLESNET_CONFIG) $(RUN_ARGS)
+
+ratlesnetv2-download-external:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.download_external_datasets $(RUN_ARGS)
+
+ratlesnetv2-orient-external-lsp:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.orient_external_dataset_lsp $(RUN_ARGS)
+
+ratlesnetv2-flip-external-si:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.flip_external_si_axis $(RUN_ARGS)
+
+ratlesnetv2-prepare-lys-roisets:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.prepare_lys_roiset_dataset $(RUN_ARGS)
 
 ratlesnetv2-prepare:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.prepare_dataset --config $(RATLESNET_CONFIG) $(RUN_ARGS)

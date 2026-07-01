@@ -29,6 +29,10 @@ def build_cloud_command_plan(
     lr: float = 1e-4,
     gpu: int = 0,
     load_memory: int = 0,
+    save_every: int | None = None,
+    max_train_cases: int | None = None,
+    max_validation_cases: int | None = None,
+    allow_partial_state_dict: bool = False,
 ) -> CloudCommandPlan:
     """Build reproducible shell commands for a Colab/cloud GPU runtime."""
     repo_path = str(ratlesnet_repo)
@@ -56,10 +60,17 @@ def build_cloud_command_plan(
         finetune_command.extend(["--validation", str(validation_input)])
     if pretrained_model:
         finetune_command.extend(["--pretrained-model", str(pretrained_model)])
+    if save_every is not None:
+        finetune_command.extend(["--save-every", str(save_every)])
+    if max_train_cases is not None:
+        finetune_command.extend(["--max-train-cases", str(max_train_cases)])
+    if max_validation_cases is not None:
+        finetune_command.extend(["--max-validation-cases", str(max_validation_cases)])
+    if allow_partial_state_dict:
+        finetune_command.append("--allow-partial-state-dict")
     return CloudCommandPlan(clone_command=clone_command, finetune_command=finetune_command)
 
 
 def format_command(cmd: list[str]) -> str:
     """Return a shell-safe one-line command."""
     return shlex.join(cmd)
-

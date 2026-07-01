@@ -119,8 +119,8 @@ Because callers depend only on these signatures, the DL upgrade in Milestone 2 c
 | Pick the test animal | Current v1 uses `BD_08_5D`, a 5d stroke animal with MRI + both IHC panels | Paths recorded in `config/animals/BD_08_5D.yml` |
 | MRI header sanity | Load the T2 NIfTI; verify spacing = 0.07×0.07×0.5 mm, orientation | `io.py` prints correct voxel size; a slice renders |
 | Channel map | Open one `.vsi` in QuPath; confirm channel→marker per panel; record NeuroTrace emission | Written into the animal config; Panel A NeuroTrace accepted as 640/660 deep-red for v1 |
-| Model availability check | Later only: find An et al. 2023 code/weights (GitHub) + Zenodo data; try to run inference once | **Not a v1 blocker.** Runs → DL is viable for v2. Doesn't run easily → keep manual-corrected masks and consider nnU-Net fine-tune later |
-| RatLesNetV2 branch setup | `dl-ratlesnetv2-finetune`: prepare corrected T2w/manual-mask folders for upstream RatLesNetV2 and print cloud finetuning commands | Independent DL track exists without changing v1 |
+| Model availability check | Later only: check An et al. mouse model/resources and RatLesNetV2 transfer-learning path | **Not a v1 blocker.** Runs → DL is viable for v2. Doesn't run easily → keep manual-corrected masks and train/fine-tune only after enough masks accumulate |
+| RatLesNetV2 branch setup | `dl-ratlesnetv2-finetune`: prepare corrected T2w/manual-mask folders, track external mouse dataset overlap/geometry, and print cloud finetuning commands | Independent DL track exists without changing v1 |
 
 **Updated:** anti-IgG specificity is resolved (Paul, 2026-06-17): the secondary
 is anti-human IgG-FITC and LYS241 is humanized Glunomab. Keep IgG-FITC naming
@@ -166,7 +166,7 @@ There is no prior QuPath threshold to reuse; calibration is a v1 task.
 
 | Task | Action | Replaces |
 |---|---|---|
-| DL lesion backend | Implement `segment.py` method='dl' calling An et al. weights; QC vs `3-5` corrected masks before trusting it | threshold backend (same signature) |
+| DL lesion backend | Implement `segment.py` method='dl' using the best proven draft backend: An et al. inference, RatLesNetV2 public-mouse + LYS fine-tune, or nnU-Net; QC vs corrected masks before trusting it | threshold backend (same signature) |
 | Fork on transfer | Good Dice → adopt DL as draft backend. Poor → keep manual-corrected masks as truth and fine-tune only after enough masks accumulate | — |
 | Cell detection (DL) | Install StarDist **and** InstanSeg in QuPath; `detect_cells.groovy` → DAPI nuclei + cell expansion; compare counts on one slide | FITC-threshold-only IHC |
 | **✎ Cell edit gate** | Manual add/delete/reclassify on sampled tiles in QuPath; log edit rate | — |
@@ -182,9 +182,12 @@ target. Training from scratch would need substantially more data and is not the
 default plan.
 
 RatLesNetV2-specific note: the branch `dl-ratlesnetv2-finetune` contains local
-dataset conversion and a cloud-oriented finetuning loop, but predictions from
-that model are still drafts. They become scientific data only after the same
-manual correction/provenance path used by v1.
+dataset conversion, public mouse dataset notes, and a cloud-oriented
+finetuning loop. The intended sequence is rat-trained RatLesNetV2 weights →
+public mouse native-space manual masks → LYS manual masks → held-out LYS
+validation. Predictions from that model are still drafts. They become
+scientific data only after the same manual correction/provenance path used by
+v1. Details are in `docs/ratlesnetv2_external_datasets.md`.
 
 ---
 
@@ -228,7 +231,11 @@ manual correction/provenance path used by v1.
 ---
 
 ## Milestone 6 (later, only if reused) — Active-learning loop  ·  ~3–5 days
-Collect corrected masks/cells → fine-tune nnU-Net (lesions) and StarDist/InstanSeg (cells) → version models → confirm edit-rate drops. Do this only once a second protocol justifies it.
+Collect corrected masks/cells → fine-tune RatLesNetV2 or nnU-Net (lesions) and
+StarDist/InstanSeg (cells) → version models → confirm edit-rate drops. Public
+mouse datasets may support lesion-model pretraining/adaptation, but held-out
+LYS cases remain the target-domain validation set. Do this only once a second
+protocol justifies it.
 
 ---
 

@@ -78,7 +78,7 @@ Run **N4 bias correction** (SimpleITK/ANTs) regardless — surface-coil RARE has
 |---|---|---|---|
 | **A. Pretrained mouse-T2 model** (recommended first) | An et al. 2023 (3D U-Net variant for mouse T2w stroke); open weights + Zenodo dataset | **Zero** — apply as-is | Domain shift risk: built on MCAO/other scanners; your thrombin + surface-coil RARE + anisotropic voxels may differ → must QC |
 | **B. nnU-Net, fine-tuned** | nnU-Net self-configuring 3D framework, initialized from A or trained on your accumulating masks | Low–med (handful of annotated volumes via transfer learning) | Best long-term fit; nnU-Net is the default winner for biomedical 3D seg |
-| C. RatLesNetv2 | Rodent T2w CNN | Med (requires training on your own data) | Only if A and B underperform |
+| C. RatLesNetv2 transfer learning | Rat-trained rodent T2w CNN, adapted through public mouse datasets then LYS | Med (cloud training; public data import + LYS masks) | Good practical branch for rodent lesion priors when LYS data are limited |
 | D. From-scratch | any U-Net | High; needs large n you don't have | Not worth it at your scale |
 
 **RatLesNetV2 branch status.** Branch `dl-ratlesnetv2-finetune` now contains a
@@ -87,6 +87,24 @@ the upstream RatLesNetV2 data format and for running a cloud finetuning script.
 It is not a v1 backend. It consumes human-corrected masks from v1/later review
 passes and produces draft DL masks that must return through the same human
 review gate before volume calculations.
+
+**External mouse data for RatLesNetV2 adaptation.** RatLesNetV2's original
+weights come from rat T2w stroke data. The external mouse datasets currently
+identified for adapting it are An et al. 2022, Koch et al. 2017, Knab et al.
+2025, and optionally the full Mulder/Dryad 2017 dataset. Use only manual
+native-space labels for training. Do not use automated masks as ground truth,
+and do not use atlas-space lesion files such as `x_masklesion.nii` for native
+RatLesNetV2 training. Known overlap: An includes a Mulder subset, Knab overlaps
+with An's Charite cases, and Koch has native plus cropped copies. The detailed
+inventory and rules live in `docs/ratlesnetv2_external_datasets.md`.
+
+Geometry mismatch is expected: LYS is `256 x 256 x 18` at
+`0.07 x 0.07 x 0.5 mm`, while representative An/Knab/Koch public mouse scans
+are `256 x 256 x 32` at about `0.1 x 0.1 x 0.5 mm`; a representative
+Mulder/Dryad T2-map header is `128 x 128 x 16` at
+`0.117188 x 0.117188 x 0.5 mm`. Therefore public mouse training is a
+pre-adaptation stage, not final validation. Held-out LYS cases are the only
+valid target-domain test.
 
 **Recommended path:** run **A** on every volume → QC against `3-5` hand-drawn
 masks. If Dice is high, you're nearly done. If it drifts, move to **B** after
@@ -224,14 +242,25 @@ you build anything around them.*
 
 **Phase 3 — compartments + edema + join + provenance.** Core/peri/contra, Swanson correction, MRI→IHC compartment transfer, the join, edit-logging columns.
 
-**Phase 4 — close the active-learning loop.** Fine-tune nnU-Net + StarDist/InstanSeg on the corrected masks/cells from Phases 1–3; batch all animals; YAML configs; QC dashboards. This is where the DL investment compounds for the *next* protocol.
+**Phase 4 — close the active-learning loop.** Fine-tune nnU-Net or RatLesNetV2
++ StarDist/InstanSeg on the corrected masks/cells from Phases 1–3; batch all
+animals; YAML configs; QC dashboards. This is where the DL investment compounds
+for the *next* protocol.
 
 **RatLesNetV2 transfer-learning branch.** In parallel with the above, use
 `ratlesnetv2_finetune/` to convert corrected T2w masks to the RatLesNetV2
-folder contract and run cloud smoke tests. This is useful for evaluating
-whether RatLesNetV2 transfers to the LYS thrombin/surface-coil data, but it
-does not change the v1 rule that the corrected human mask is the source of
-truth.
+folder contract and run cloud smoke tests. The intended training sequence is:
+
+```text
+RatLesNetV2 rat weights
+  -> public mouse native-space manual masks
+  -> LYS native-space human-reviewed masks
+  -> held-out LYS validation
+```
+
+This is useful for evaluating whether RatLesNetV2 transfers to the LYS
+thrombin/surface-coil data, but it does not change the v1 rule that the
+corrected human mask is the source of truth.
 
 Stop where accuracy is good enough for the biology. For a 10-animal exploratory study, Phases 1–3 with solid correction gates are likely the right stopping point; Phase 4 is the payoff when this becomes a recurring assay.
 
@@ -259,7 +288,7 @@ Stop where accuracy is good enough for the biology. For a 10-animal exploratory 
 |---|---|---|
 | Bruker IO | brkraw | raw → NIfTI |
 | MRI brain extract | `antspynet` | DL rodent skull-strip |
-| MRI lesion seg | **An et al. 2023 weights** (start) → **nnU-Net** (fine-tune); RatLesNetv2 (fallback) | DL lesion masks |
+| MRI lesion seg | **An et al. weights** (quick baseline) → **RatLesNetV2 public-mouse + LYS fine-tune** or **nnU-Net** | DL draft lesion masks |
 | MRI mask editing | **ITK-SNAP / 3D Slicer** (primary), Fiji-Labkit (lab-familiar), napari (Python-native) | ✎ border correction |
 | MRI registration | AIDAmri / `antspyx` (SyN) | → Allen, edema |
 | Histology IO | QuPath + Bio-Formats | `.vsi`, projects |
@@ -270,7 +299,14 @@ Stop where accuracy is good enough for the biology. For a 10-animal exploratory 
 | Orchestration | Python (`pathlib`, pandas, PyYAML), `paquo`, `subprocess` | glue, edit-logging, fine-tune bookkeeping |
 | Stats (downstream) | R | mixed models, plots |
 
-**Key references:** An et al. 2023 *Sci Rep* (mouse T2w DL lesion seg, open weights + Zenodo data); Valverde et al. (RatLesNetv2); Isensee et al. (nnU-Net); Koch et al. 2019 (atlas edema correction); Pallast et al. 2019 (AIDAmri); Chiaruttini et al. 2025 (ABBA+BraiAn); Carey et al. 2023 (DeepSlice); Goldsborough et al. 2024 (InstanSeg); Schmidt et al. 2018 (StarDist); Bankhead et al. 2017 (QuPath); Drieu et al. 2020 (thrombin model).
+**Key references:** An et al. 2022/2023 (mouse T2w DL lesion seg and Zenodo
+data); Valverde et al. (RatLesNetv2); Koch et al. 2017/2019 (mouse stroke MRI
+dataset and atlas edema correction); Mulder et al. 2017 (mouse tMCAO MRI
+dataset); Knab et al. 2025 (mouse MRI outcome dataset); Isensee et al.
+(nnU-Net); Pallast et al. 2019 (AIDAmri); Chiaruttini et al. 2025
+(ABBA+BraiAn); Carey et al. 2023 (DeepSlice); Goldsborough et al. 2024
+(InstanSeg); Schmidt et al. 2018 (StarDist); Bankhead et al. 2017 (QuPath);
+Drieu et al. 2020 (thrombin model).
 
 ---
 

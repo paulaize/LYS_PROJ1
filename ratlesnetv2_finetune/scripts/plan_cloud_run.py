@@ -28,6 +28,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--loadMemory", type=int, default=0)
+    parser.add_argument("--save-every", type=int, default=None)
+    parser.add_argument("--max-train-cases", type=int, default=None)
+    parser.add_argument("--max-validation-cases", type=int, default=None)
+    parser.add_argument("--allow-partial-state-dict", action="store_true")
     return parser.parse_args()
 
 
@@ -51,6 +55,10 @@ def main() -> int:
         lr=args.lr,
         gpu=args.gpu,
         load_memory=args.loadMemory,
+        save_every=args.save_every,
+        max_train_cases=args.max_train_cases,
+        max_validation_cases=args.max_validation_cases,
+        allow_partial_state_dict=args.allow_partial_state_dict,
     )
 
     print("# Install Python dependencies first, for example:")
@@ -66,4 +74,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
