@@ -1,4 +1,5 @@
 import csv
+import json
 import struct
 import zipfile
 from pathlib import Path
@@ -12,9 +13,16 @@ from ratlesnetv2_finetune.commands import build_cloud_command_plan, format_comma
 from ratlesnetv2_finetune.dataset import prepare_dataset
 from ratlesnetv2_finetune.roiset_to_nifti_mask import convert_roiset_to_nifti_mask
 from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
+    _parse_export_epochs,
+    _parse_export_splits,
     _patch_nibabel_get_data_compat,
+    _publish_latest_qc_overlay,
+    _save_prediction_artifacts,
     _segmentation_metrics,
+    _should_export_epoch,
+    _update_best_checkpoints,
     _write_metric_plots,
+    _write_run_status,
 )
 from ratlesnetv2_finetune.scripts.flip_external_si_axis import flip_pair_axis
 from ratlesnetv2_finetune.scripts.orient_external_dataset_lsp import (
@@ -635,7 +643,135 @@ def test_metric_plots_are_written_when_matplotlib_is_available(tmp_path):
 
     assert (run_dir / "loss_curves.png").exists()
     assert (run_dir / "validation_metric_curves.png").exists()
+    assert (run_dir / "voxel_count_curves.png").exists()
     assert (run_dir / "final_metric_summary.png").exists()
+
+
+def test_prediction_export_helpers_parse_epochs_and_splits():
+    assert _parse_export_splits("validation,test") == {"validation", "test"}
+    assert _parse_export_epochs("1,2,final") == {1, 2, "final"}
+    assert _should_export_epoch(2, is_final=False, export_epochs={1, 2, "final"})
+    assert _should_export_epoch(9, is_final=True, export_epochs={1, 2, "final"})
+    assert _should_export_epoch(9, is_final=False, export_epochs={"all"})
+    with pytest.raises(ValueError, match="Unknown"):
+        _parse_export_splits("bad")
+
+
+def test_best_checkpoint_writer_saves_dice_and_loss_models(tmp_path):
+    class FakeModel:
+        def state_dict(self):
+            return {"weight": 1}
+
+    class FakeTorch:
+        @staticmethod
+        def save(_state, path):
+            Path(path).write_text("saved")
+
+    summary = {
+        "epoch": 2,
+        "split": "validation",
+        "loss": 0.4,
+        "dice_mean": 0.2,
+        "precision_mean": 0.3,
+        "recall_mean": 0.4,
+        "target_voxels": 10,
+        "pred_voxels": 8,
+    }
+    best_state: dict[str, dict] = {}
+
+    improved = _update_best_checkpoints(
+        torch=FakeTorch,
+        model=FakeModel(),
+        run_dir=tmp_path,
+        summary=summary,
+        best_state=best_state,
+        min_dice_delta=0.0,
+    )
+
+    assert improved is True
+    assert (tmp_path / "best_by_validation_dice.model").exists()
+    assert (tmp_path / "best_by_validation_loss.model").exists()
+    assert (tmp_path / "best_checkpoints.json").exists()
+
+
+def test_prediction_artifacts_write_nifti_and_overlay(tmp_path):
+    pytest.importorskip("matplotlib")
+    source_dir = tmp_path / "case"
+    source_dir.mkdir()
+    scan = np.arange(5 * 6 * 3, dtype=np.float32).reshape((5, 6, 3))
+    _write_nifti(source_dir / "scan.nii.gz", scan)
+    x = scan[..., np.newaxis]
+    target = np.zeros((1, 2, 5, 6, 3), dtype=np.float32)
+    pred = np.zeros((1, 2, 5, 6, 3), dtype=np.float32)
+    target[:, 0, ...] = 1.0
+    pred[:, 0, ...] = 2.0
+    target[0, 0, 2, 3, 1] = 0.0
+    target[0, 1, 2, 3, 1] = 1.0
+    pred[0, 0, 2, 3, 1] = -2.0
+    pred[0, 1, 2, 3, 1] = 4.0
+
+    class FakeData:
+        list = [source_dir]
+
+    record = _save_prediction_artifacts(
+        x=x,
+        y=target,
+        pred=pred,
+        data=FakeData(),
+        index=0,
+        case_id="case",
+        out_dir=tmp_path / "export",
+        threshold=0.5,
+    )
+
+    assert Path(record["scan"]).exists()
+    assert Path(record["target_mask"]).exists()
+    assert Path(record["pred_mask"]).exists()
+    assert Path(record["lesion_probability"]).exists()
+    assert Path(record["overlay"]).exists()
+    saved_pred = np.asanyarray(nib.load(record["pred_mask"]).dataobj)
+    assert saved_pred.shape == scan.shape
+    assert int(saved_pred.sum()) == 1
+
+
+def test_latest_qc_overlay_is_published_at_run_root(tmp_path):
+    export_dir = tmp_path / "prediction_exports" / "validation" / "epoch_002" / "case_a"
+    export_dir.mkdir(parents=True)
+    overlay = export_dir / "overlay.png"
+    overlay.write_bytes(b"png")
+
+    _publish_latest_qc_overlay(
+        tmp_path,
+        {"case_id": "case_a", "overlay": str(overlay)},
+        split="validation",
+        epoch=2,
+        label="epoch_002",
+    )
+
+    assert (tmp_path / "latest_validation_qc_overlay.png").read_bytes() == b"png"
+    assert (tmp_path / "latest_qc_overlay.png").read_bytes() == b"png"
+    metadata = json.loads((tmp_path / "latest_qc_overlay.json").read_text())
+    assert metadata["split"] == "validation"
+    assert metadata["epoch"] == 2
+    assert metadata["case_id"] == "case_a"
+
+
+def test_run_status_records_interrupt_metadata(tmp_path):
+    _write_run_status(
+        tmp_path / "run_status.json",
+        status="interrupted",
+        completed_epoch=3,
+        interrupted_epoch=4,
+        reason="KeyboardInterrupt",
+    )
+
+    status = json.loads((tmp_path / "run_status.json").read_text())
+    assert status == {
+        "completed_epoch": 3,
+        "interrupted_epoch": 4,
+        "reason": "KeyboardInterrupt",
+        "status": "interrupted",
+    }
 
 
 def test_cloud_command_plan_includes_pretrained_model():
@@ -652,8 +788,13 @@ def test_cloud_command_plan_includes_pretrained_model():
         gpu=0,
         load_memory=0,
         save_every=1,
+        eval_only=True,
         eval_every=1,
         metrics_threshold=0.4,
+        early_stop_patience=4,
+        export_predictions="validation",
+        export_prediction_limit=2,
+        export_prediction_epochs="1,final",
         max_train_cases=1,
         max_validation_cases=1,
         max_test_cases=1,
@@ -669,8 +810,13 @@ def test_cloud_command_plan_includes_pretrained_model():
     assert "--epochs 3" in command
     assert "--lr 5e-05" in command
     assert "--save-every 1" in command
+    assert "--eval-only" in command
     assert "--eval-every 1" in command
     assert "--metrics-threshold 0.4" in command
+    assert "--early-stop-patience 4" in command
+    assert "--export-predictions validation" in command
+    assert "--export-prediction-limit 2" in command
+    assert "--export-prediction-epochs 1,final" in command
     assert "--max-train-cases 1" in command
     assert "--max-validation-cases 1" in command
     assert "--max-test-cases 1" in command

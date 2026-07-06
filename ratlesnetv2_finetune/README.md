@@ -655,41 +655,149 @@ pretrained `RatLesNetv2.model` in Colab and pass it with
 `--pretrained-model`. Use `--require-pretrained` on real runs so the script
 fails loudly instead of silently training from scratch.
 
-First full staged Colab run after the smoke tests:
+## Updated Training Strategy After First Stage 1 Metrics
+
+The first real Stage 1 external-adaptation run gave a weak transfer signal on
+LYS validation:
+
+```text
+epoch 1 Dice 0.02453
+epoch 2 Dice 0.03021  # best observed early checkpoint
+epoch 8 Dice 0.00750
+```
+
+Training loss decreased, but LYS validation Dice and recall stayed near zero
+while accuracy stayed around `0.995`, which is background-dominated and not
+useful for lesion quality. Do not treat a 50-epoch external stage at `lr=1e-4`
+as the default path. Use external mouse adaptation only if it improves
+downstream LYS fine-tuning compared with direct rat-to-LYS fine-tuning.
+
+The revised experiment order is:
+
+```text
+Run 0: upstream rat model -> evaluate LYS validation, no training
+Run 1: upstream rat model -> LYS fine-tuning baseline
+Run 2: upstream rat model -> short external adaptation at 5e-5
+Run 3: upstream rat model -> gentle external adaptation at 1e-5
+Run 4: best short external checkpoint -> LYS fine-tuning
+```
+
+Select models by LYS validation Dice. Use the held-out LYS test split only
+after choosing the strategy.
+
+Diagnostic commands to inspect the current/previous Stage 1 run:
+
+```python
+from pathlib import Path
+import pandas as pd
+
+run = Path("/content/drive/MyDrive/ratlesnet_runs_external_adapt/1")
+epoch = pd.read_csv(run / "metrics_epoch.csv")
+display(epoch[[
+    "epoch", "split", "dice_mean", "precision_mean", "recall_mean",
+    "target_voxels", "pred_voxels", "tp", "fp", "fn"
+]])
+
+cases = pd.read_csv(run / "metrics_cases.csv")
+latest = cases[cases["epoch"] == cases["epoch"].max()]
+display(latest[[
+    "case_id", "dice", "precision", "recall", "target_voxels", "pred_voxels"
+]].sort_values("dice"))
+```
+
+Full staged Colab runs after the smoke tests:
 
 ```bash
-# 1. External mouse adaptation. Validation is LYS target-domain validation.
-#    Do not pass the held-out LYS test split at this stage.
+# Run 0. Baseline: upstream rat model on LYS validation, no training.
+python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
+  --ratlesnet-repo /content/RatLesNetv2 \
+  --input /content/LYS_T2w_manual_v0_split/train \
+  --validation /content/LYS_T2w_manual_v0_split/validation \
+  --output /content/drive/MyDrive/ratlesnet_runs_baseline_rat_on_lys_val \
+  --pretrained-model /content/RatLesNetv2/trained_models/Table2-3/RatLesNetv2/homogeneous/model-1 \
+  --require-pretrained \
+  --eval-only \
+  --export-predictions validation \
+  --export-prediction-limit 8 \
+  --export-prediction-epochs all
+
+# Run 1. Direct LYS fine-tuning baseline.
+python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
+  --ratlesnet-repo /content/RatLesNetv2 \
+  --input /content/LYS_T2w_manual_v0_split/train \
+  --validation /content/LYS_T2w_manual_v0_split/validation \
+  --output /content/drive/MyDrive/ratlesnet_runs_lys_direct \
+  --pretrained-model /content/RatLesNetv2/trained_models/Table2-3/RatLesNetv2/homogeneous/model-1 \
+  --require-pretrained \
+  --epochs 50 \
+  --lr 5e-5 \
+  --gpu 0 \
+  --loadMemory 0 \
+  --save-every 5 \
+  --eval-every 1 \
+  --early-stop-patience 8 \
+  --export-predictions validation \
+  --export-prediction-limit 8 \
+  --export-prediction-epochs all
+
+# Run 2. Short external mouse adaptation. Validation is LYS target-domain validation.
 python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --ratlesnet-repo /content/RatLesNetv2 \
   --input /content/External_Mouse_T2w_manual_LSP_SI_v0_split/train \
   --validation /content/LYS_T2w_manual_v0_split/validation \
-  --output /content/drive/MyDrive/ratlesnet_runs_external_adapt \
-  --pretrained-model /content/drive/MyDrive/RatLesNetv2.model \
+  --output /content/drive/MyDrive/ratlesnet_runs_external_short_5e5 \
+  --pretrained-model /content/RatLesNetv2/trained_models/Table2-3/RatLesNetv2/homogeneous/model-1 \
   --require-pretrained \
-  --epochs 50 \
-  --lr 1e-4 \
+  --epochs 5 \
+  --lr 5e-5 \
   --gpu 0 \
   --loadMemory 0 \
-  --save-every 5 \
-  --eval-every 1
+  --save-every 1 \
+  --eval-every 1 \
+  --export-predictions validation \
+  --export-prediction-limit 8 \
+  --export-prediction-epochs all
 
-# 2. LYS target-domain fine-tune and held-out test evaluation.
-#    Adjust the pretrained path if the external adaptation run number is not 1.
+# Run 3. Very gentle external mouse adaptation.
+python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
+  --ratlesnet-repo /content/RatLesNetv2 \
+  --input /content/External_Mouse_T2w_manual_LSP_SI_v0_split/train \
+  --validation /content/LYS_T2w_manual_v0_split/validation \
+  --output /content/drive/MyDrive/ratlesnet_runs_external_short_1e5 \
+  --pretrained-model /content/RatLesNetv2/trained_models/Table2-3/RatLesNetv2/homogeneous/model-1 \
+  --require-pretrained \
+  --epochs 10 \
+  --lr 1e-5 \
+  --gpu 0 \
+  --loadMemory 0 \
+  --save-every 1 \
+  --eval-every 1 \
+  --export-predictions validation \
+  --export-prediction-limit 8 \
+  --export-prediction-epochs all
+
+# Run 4. LYS fine-tuning after the best short external bridge.
+# Replace EXTERNAL_RUN with either ratlesnet_runs_external_short_5e5/<run>
+# or ratlesnet_runs_external_short_1e5/<run>, whichever has better LYS val Dice.
+EXTERNAL_RUN=/content/drive/MyDrive/ratlesnet_runs_external_short_5e5/1
 python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --ratlesnet-repo /content/RatLesNetv2 \
   --input /content/LYS_T2w_manual_v0_split/train \
   --validation /content/LYS_T2w_manual_v0_split/validation \
   --test /content/LYS_T2w_manual_v0_split/test \
-  --output /content/drive/MyDrive/ratlesnet_runs_lys_finetune \
-  --pretrained-model /content/drive/MyDrive/ratlesnet_runs_external_adapt/1/RatLesNetv2.model \
+  --output /content/drive/MyDrive/ratlesnet_runs_lys_after_external \
+  --pretrained-model "$EXTERNAL_RUN/best_by_validation_dice.model" \
   --require-pretrained \
-  --epochs 100 \
-  --lr 1e-4 \
+  --epochs 50 \
+  --lr 5e-5 \
   --gpu 0 \
   --loadMemory 0 \
-  --save-every 10 \
-  --eval-every 1
+  --save-every 5 \
+  --eval-every 1 \
+  --early-stop-patience 8 \
+  --export-predictions validation,test \
+  --export-prediction-limit 8 \
+  --export-prediction-epochs all
 ```
 
 Each run directory now writes:
@@ -703,8 +811,23 @@ final_metrics.json               # final validation/test summary
 loss_curves.png                  # train/eval loss over epochs
 validation_metric_curves.png     # Dice/IoU/precision/recall over epochs
 final_metric_summary.png         # final validation/test metric bars
+voxel_count_curves.png           # target/predicted lesion voxel curves
+latest_qc_overlay.png            # newest root QC overlay for quick Colab display
+latest_validation_qc_overlay.png # newest validation overlay when validation is exported
+latest_qc_overlay.json           # source case/epoch for latest_qc_overlay.png
+best_by_validation_dice.model    # model selected by LYS validation Dice
+best_by_validation_loss.model    # model selected by LYS validation loss
+last.model                       # latest epoch checkpoint
+interrupted.model                # written when Ctrl-C interrupts training
+run_status.json                  # completed/evaluated/early_stopped/interrupted status
 RatLesNetv2.model
 ```
+
+If you press Ctrl-C in Colab, the script handles `KeyboardInterrupt`
+gracefully: it saves `interrupted.model`, refreshes `last.model`, writes
+`run_status.json`, updates any available plots, and exits with status `130`.
+Use `best_by_validation_dice.model` when available; otherwise
+`interrupted.model` is the explicit stopped-run checkpoint.
 
 Report final model performance from the LYS `test` rows in
 `final_metrics.json` or `metrics_epoch.csv`. The LYS validation rows are useful
@@ -721,7 +844,13 @@ root = Path("/content/drive/MyDrive/ratlesnet_runs_lys_finetune")
 run = sorted([p for p in root.iterdir() if p.is_dir() and p.name.isdigit()],
              key=lambda p: int(p.name))[-1]
 
-for name in ["loss_curves.png", "validation_metric_curves.png", "final_metric_summary.png"]:
+for name in [
+    "latest_qc_overlay.png",
+    "loss_curves.png",
+    "validation_metric_curves.png",
+    "voxel_count_curves.png",
+    "final_metric_summary.png",
+]:
     path = run / name
     if path.exists():
         display(Image(filename=str(path)))

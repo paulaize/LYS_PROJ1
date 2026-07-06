@@ -30,9 +30,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--loadMemory", type=int, default=0)
     parser.add_argument("--save-every", type=int, default=None)
+    parser.add_argument("--eval-only", action="store_true")
     parser.add_argument("--eval-every", type=int, default=1)
     parser.add_argument("--eval-train", action="store_true")
     parser.add_argument("--metrics-threshold", type=float, default=0.5)
+    parser.add_argument("--no-plots", action="store_true")
+    parser.add_argument("--early-stop-patience", type=int, default=None)
+    parser.add_argument("--early-stop-min-delta", type=float, default=None)
+    parser.add_argument("--export-predictions", default=None)
+    parser.add_argument("--export-prediction-limit", type=int, default=None)
+    parser.add_argument("--export-prediction-epochs", default=None)
     parser.add_argument("--max-train-cases", type=int, default=None)
     parser.add_argument("--max-validation-cases", type=int, default=None)
     parser.add_argument("--max-test-cases", type=int, default=None)
@@ -65,9 +72,16 @@ def main() -> int:
         gpu=args.gpu,
         load_memory=args.loadMemory,
         save_every=args.save_every,
+        eval_only=args.eval_only,
         eval_every=args.eval_every,
         eval_train=args.eval_train,
         metrics_threshold=args.metrics_threshold,
+        no_plots=args.no_plots,
+        early_stop_patience=args.early_stop_patience,
+        early_stop_min_delta=args.early_stop_min_delta,
+        export_predictions=args.export_predictions,
+        export_prediction_limit=args.export_prediction_limit,
+        export_prediction_epochs=args.export_prediction_epochs,
         max_train_cases=args.max_train_cases,
         max_validation_cases=args.max_validation_cases,
         max_test_cases=args.max_test_cases,

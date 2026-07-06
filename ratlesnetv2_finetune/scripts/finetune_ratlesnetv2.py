@@ -12,6 +12,7 @@ import argparse
 import csv
 import json
 import random
+import shutil
 import statistics
 import sys
 from pathlib import Path
@@ -53,6 +54,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20260626)
     parser.add_argument("--save-every", type=int, default=10)
     parser.add_argument(
+        "--eval-only",
+        action="store_true",
+        help="Load the model and evaluate validation/test splits without training.",
+    )
+    parser.add_argument(
         "--eval-every",
         type=int,
         default=1,
@@ -73,6 +79,34 @@ def parse_args() -> argparse.Namespace:
         "--no-plots",
         action="store_true",
         help="Disable PNG metric plots. By default plots are updated when metrics are written.",
+    )
+    parser.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=None,
+        help="Stop after N validation evaluations without Dice improvement.",
+    )
+    parser.add_argument(
+        "--early-stop-min-delta",
+        type=float,
+        default=0.0,
+        help="Minimum validation Dice improvement required to reset early stopping.",
+    )
+    parser.add_argument(
+        "--export-predictions",
+        default="",
+        help="Comma-separated splits for prediction exports: train,validation,test.",
+    )
+    parser.add_argument(
+        "--export-prediction-limit",
+        type=int,
+        default=8,
+        help="Maximum cases per split/epoch to export when --export-predictions is set.",
+    )
+    parser.add_argument(
+        "--export-prediction-epochs",
+        default="1,2,5,final",
+        help="Comma-separated epochs to export, plus optional 'final' or 'all'.",
     )
     parser.add_argument("--max-train-cases", type=int, default=None, help="Small cloud smoke test")
     parser.add_argument(
@@ -142,6 +176,12 @@ def main() -> int:
         _require_nonempty(test_data, "test")
     else:
         test_data = None
+    export_splits = _parse_export_splits(args.export_predictions)
+    export_epochs = _parse_export_epochs(args.export_prediction_epochs)
+    if export_splits and args.export_prediction_limit < 1:
+        raise ValueError("--export-prediction-limit must be >= 1 when exporting predictions")
+    if args.early_stop_patience is not None and args.early_stop_patience < 1:
+        raise ValueError("--early-stop-patience must be >= 1")
 
     model = RatLesNetv2(modalities=args.modalities, filters=args.filters)
     model.to(device)
@@ -174,56 +214,165 @@ def main() -> int:
         test_cases=len(test_data or []),
     )
 
-    print(now() + f"Start training for {args.epochs} epochs")
-    for epoch in range(args.epochs):
-        epoch_num = epoch + 1
-        train_loss = _run_epoch(
+    if args.eval_only:
+        summaries = _evaluate_requested_splits(
             model=model,
-            data=train_data,
             loss_fn=CrossEntropyDiceLoss,
-            optimizer=optimizer,
+            torch=torch,
+            threshold=args.metrics_threshold,
+            epoch=0,
+            validation_data=val_data,
+            test_data=test_data,
         )
-        _append_loss(run_dir / "training_loss", train_loss)
+        if not summaries:
+            raise ValueError("--eval-only requires --validation and/or --test")
+        for summary in summaries:
+            _append_epoch_metrics(run_dir / "metrics_epoch.csv", summary)
+            _append_case_metrics(run_dir / "metrics_cases.csv", summary)
+        _export_requested_predictions(
+            model=model,
+            torch=torch,
+            threshold=args.metrics_threshold,
+            run_dir=run_dir,
+            epoch=0,
+            is_final=True,
+            export_splits=export_splits,
+            export_epochs=export_epochs,
+            export_limit=args.export_prediction_limit,
+            train_data=train_data,
+            val_data=val_data,
+            test_data=test_data,
+        )
+        _write_final_metrics(run_dir / "final_metrics.json", summaries)
+        if not args.no_plots:
+            _write_metric_plots(run_dir)
+        _write_run_status(
+            run_dir / "run_status.json",
+            status="evaluated",
+            completed_epoch=0,
+            reason="eval_only",
+        )
+        print(now() + f"Evaluation-only run complete: {run_dir}")
+        return 0
 
-        val_loss: float | None = None
-        epoch_summaries: list[EvaluationSummary] = []
-        should_eval = args.eval_every > 0 and epoch_num % args.eval_every == 0
-        if should_eval and args.eval_train:
-            train_eval = _run_evaluation(
-                split="train",
-                epoch=epoch_num,
+    best_state: dict[str, dict[str, Any]] = {}
+    no_dice_improvement = 0
+    completed_epoch = 0
+    current_epoch = 0
+    stopped_early = False
+    stop_reason = ""
+    print(now() + f"Start training for {args.epochs} epochs")
+    try:
+        for epoch in range(args.epochs):
+            epoch_num = epoch + 1
+            current_epoch = epoch_num
+            train_loss = _run_epoch(
                 model=model,
                 data=train_data,
                 loss_fn=CrossEntropyDiceLoss,
-                torch=torch,
-                threshold=args.metrics_threshold,
+                optimizer=optimizer,
             )
-            epoch_summaries.append(train_eval)
-        if should_eval and val_data is not None:
-            val_eval = _run_evaluation(
-                split="validation",
-                epoch=epoch_num,
-                model=model,
-                data=val_data,
-                loss_fn=CrossEntropyDiceLoss,
-                torch=torch,
-                threshold=args.metrics_threshold,
+            _append_loss(run_dir / "training_loss", train_loss)
+
+            val_loss: float | None = None
+            epoch_summaries: list[EvaluationSummary] = []
+            should_eval = args.eval_every > 0 and epoch_num % args.eval_every == 0
+            if should_eval and args.eval_train:
+                train_eval = _run_evaluation(
+                    split="train",
+                    epoch=epoch_num,
+                    model=model,
+                    data=train_data,
+                    loss_fn=CrossEntropyDiceLoss,
+                    torch=torch,
+                    threshold=args.metrics_threshold,
+                )
+                epoch_summaries.append(train_eval)
+            if should_eval and val_data is not None:
+                val_eval = _run_evaluation(
+                    split="validation",
+                    epoch=epoch_num,
+                    model=model,
+                    data=val_data,
+                    loss_fn=CrossEntropyDiceLoss,
+                    torch=torch,
+                    threshold=args.metrics_threshold,
+                )
+                val_loss = val_eval["loss"]
+                _append_loss(run_dir / "validation_loss", val_loss)
+                epoch_summaries.append(val_eval)
+                improved = _update_best_checkpoints(
+                    torch=torch,
+                    model=model,
+                    run_dir=run_dir,
+                    summary=val_eval,
+                    best_state=best_state,
+                    min_dice_delta=args.early_stop_min_delta,
+                )
+                no_dice_improvement = 0 if improved else no_dice_improvement + 1
+            for summary in epoch_summaries:
+                _append_epoch_metrics(run_dir / "metrics_epoch.csv", summary)
+                _append_case_metrics(run_dir / "metrics_cases.csv", summary)
+            if epoch_summaries:
+                _export_requested_predictions(
+                    model=model,
+                    torch=torch,
+                    threshold=args.metrics_threshold,
+                    run_dir=run_dir,
+                    epoch=epoch_num,
+                    is_final=False,
+                    export_splits=export_splits,
+                    export_epochs=export_epochs,
+                    export_limit=args.export_prediction_limit,
+                    train_data=train_data,
+                    val_data=val_data,
+                    test_data=test_data,
+                )
+            if epoch_summaries and not args.no_plots:
+                _write_metric_plots(run_dir)
+
+            val_text = "" if val_loss is None else f" Val Loss: {val_loss:.8g}."
+            metrics_text = _format_epoch_metrics(epoch_summaries)
+            print(
+                now()
+                + f"Epoch: {epoch_num}. Loss: {train_loss:.8g}.{val_text}{metrics_text}"
             )
-            val_loss = val_eval["loss"]
-            _append_loss(run_dir / "validation_loss", val_loss)
-            epoch_summaries.append(val_eval)
-        for summary in epoch_summaries:
-            _append_epoch_metrics(run_dir / "metrics_epoch.csv", summary)
-            _append_case_metrics(run_dir / "metrics_cases.csv", summary)
-        if epoch_summaries and not args.no_plots:
+
+            if args.save_every > 0 and epoch_num % args.save_every == 0:
+                torch.save(model.state_dict(), run_dir / f"RatLesNetv2_epoch{epoch_num:03d}.model")
+            torch.save(model.state_dict(), run_dir / "last.model")
+            completed_epoch = epoch_num
+            if (
+                args.early_stop_patience is not None
+                and val_data is not None
+                and should_eval
+                and no_dice_improvement >= args.early_stop_patience
+            ):
+                stopped_early = True
+                stop_reason = (
+                    f"Early stopping after {no_dice_improvement} validation evaluations "
+                    "without Dice improvement."
+                )
+                print(now() + stop_reason)
+                break
+    except KeyboardInterrupt:
+        torch.save(model.state_dict(), run_dir / "interrupted.model")
+        torch.save(model.state_dict(), run_dir / "last.model")
+        _write_run_status(
+            run_dir / "run_status.json",
+            status="interrupted",
+            completed_epoch=completed_epoch,
+            interrupted_epoch=current_epoch,
+            reason="KeyboardInterrupt",
+        )
+        if not args.no_plots:
             _write_metric_plots(run_dir)
-
-        val_text = "" if val_loss is None else f" Val Loss: {val_loss:.8g}."
-        metrics_text = _format_epoch_metrics(epoch_summaries)
-        print(now() + f"Epoch: {epoch_num}. Loss: {train_loss:.8g}.{val_text}{metrics_text}")
-
-        if args.save_every > 0 and epoch_num % args.save_every == 0:
-            torch.save(model.state_dict(), run_dir / f"RatLesNetv2_epoch{epoch_num:03d}.model")
+        print(
+            now()
+            + "Training interrupted by Ctrl-C. Saved interrupted.model, "
+            f"last.model, and run_status.json in {run_dir}"
+        )
+        return 130
 
     torch.save(model.state_dict(), run_dir / "RatLesNetv2.model")
     print(now() + f"Saved final model: {run_dir / 'RatLesNetv2.model'}")
@@ -233,7 +382,7 @@ def main() -> int:
         final_summaries.append(
             _run_evaluation(
                 split="validation_final",
-                epoch=args.epochs,
+                epoch=completed_epoch,
                 model=model,
                 data=val_data,
                 loss_fn=CrossEntropyDiceLoss,
@@ -245,7 +394,7 @@ def main() -> int:
         final_summaries.append(
             _run_evaluation(
                 split="test",
-                epoch=args.epochs,
+                epoch=completed_epoch,
                 model=model,
                 data=test_data,
                 loss_fn=CrossEntropyDiceLoss,
@@ -256,6 +405,20 @@ def main() -> int:
     for summary in final_summaries:
         _append_epoch_metrics(run_dir / "metrics_epoch.csv", summary)
         _append_case_metrics(run_dir / "metrics_cases.csv", summary)
+    _export_requested_predictions(
+        model=model,
+        torch=torch,
+        threshold=args.metrics_threshold,
+        run_dir=run_dir,
+        epoch=completed_epoch,
+        is_final=True,
+        export_splits=export_splits,
+        export_epochs=export_epochs,
+        export_limit=args.export_prediction_limit,
+        train_data=train_data,
+        val_data=val_data,
+        test_data=test_data,
+    )
     if final_summaries:
         _write_final_metrics(run_dir / "final_metrics.json", final_summaries)
         if not args.no_plots:
@@ -267,6 +430,12 @@ def main() -> int:
             + "No validation/test split was provided; wrote training loss only. "
             "Do not treat this run as a performance estimate."
         )
+    _write_run_status(
+        run_dir / "run_status.json",
+        status="early_stopped" if stopped_early else "completed",
+        completed_epoch=completed_epoch,
+        reason=stop_reason,
+    )
     return 0
 
 
@@ -440,6 +609,112 @@ def _run_evaluation(
     return summary
 
 
+def _evaluate_requested_splits(
+    *,
+    model: Any,
+    loss_fn: Any,
+    torch: Any,
+    threshold: float,
+    epoch: int,
+    validation_data: Any | None,
+    test_data: Any | None,
+) -> list[EvaluationSummary]:
+    summaries: list[EvaluationSummary] = []
+    if validation_data is not None:
+        summaries.append(
+            _run_evaluation(
+                split="validation",
+                epoch=epoch,
+                model=model,
+                data=validation_data,
+                loss_fn=loss_fn,
+                torch=torch,
+                threshold=threshold,
+            )
+        )
+    if test_data is not None:
+        summaries.append(
+            _run_evaluation(
+                split="test",
+                epoch=epoch,
+                model=model,
+                data=test_data,
+                loss_fn=loss_fn,
+                torch=torch,
+                threshold=threshold,
+            )
+        )
+    return summaries
+
+
+def _update_best_checkpoints(
+    *,
+    torch: Any,
+    model: Any,
+    run_dir: Path,
+    summary: EvaluationSummary,
+    best_state: dict[str, dict[str, Any]],
+    min_dice_delta: float,
+) -> bool:
+    dice = summary.get("dice_mean")
+    loss = float(summary["loss"])
+    improved_dice = False
+    if dice is not None:
+        previous = best_state.get("validation_dice", {}).get("value")
+        if previous is None or float(dice) > float(previous) + min_dice_delta:
+            torch.save(model.state_dict(), run_dir / "best_by_validation_dice.model")
+            best_state["validation_dice"] = _best_checkpoint_record(
+                summary=summary,
+                metric="dice_mean",
+                value=float(dice),
+                filename="best_by_validation_dice.model",
+            )
+            improved_dice = True
+
+    previous_loss = best_state.get("validation_loss", {}).get("value")
+    if previous_loss is None or loss < float(previous_loss):
+        torch.save(model.state_dict(), run_dir / "best_by_validation_loss.model")
+        best_state["validation_loss"] = _best_checkpoint_record(
+            summary=summary,
+            metric="loss",
+            value=loss,
+            filename="best_by_validation_loss.model",
+        )
+    _write_best_checkpoint_metadata(run_dir / "best_checkpoints.json", best_state)
+    return improved_dice
+
+
+def _best_checkpoint_record(
+    *,
+    summary: EvaluationSummary,
+    metric: str,
+    value: float,
+    filename: str,
+) -> dict[str, Any]:
+    return {
+        "epoch": int(summary["epoch"]),
+        "split": summary["split"],
+        "metric": metric,
+        "value": value,
+        "filename": filename,
+        "loss": float(summary["loss"]),
+        "dice_mean": _json_number(summary.get("dice_mean")),
+        "precision_mean": _json_number(summary.get("precision_mean")),
+        "recall_mean": _json_number(summary.get("recall_mean")),
+        "target_voxels": int(summary.get("target_voxels", 0)),
+        "pred_voxels": int(summary.get("pred_voxels", 0)),
+    }
+
+
+def _json_number(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
+def _write_best_checkpoint_metadata(path: Path, best_state: dict[str, dict[str, Any]]) -> None:
+    with path.open("w") as fh:
+        json.dump(best_state, fh, indent=2, sort_keys=True)
+
+
 def _loss_to_float(loss: Any) -> float:
     return float(loss.detach().cpu().numpy())
 
@@ -517,6 +792,25 @@ def _target_to_binary(target: Any) -> np.ndarray:
     return arr > 0.5
 
 
+def _lesion_probability_map(pred: Any) -> np.ndarray:
+    arr = _to_numpy(pred)
+    if arr.ndim >= 5 and arr.shape[1] > 1:
+        return np.squeeze(_softmax(arr, axis=1)[:, 1, ...])
+    if arr.ndim >= 5 and arr.shape[1] == 1:
+        return np.squeeze(_score_to_probability(arr[:, 0, ...]))
+    if arr.ndim == 4 and 1 < arr.shape[0] <= 4:
+        return np.squeeze(_softmax(arr, axis=0)[1, ...])
+    if arr.ndim == 4 and arr.shape[0] == 1:
+        return np.squeeze(_score_to_probability(arr[0, ...]))
+    return np.squeeze(_score_to_probability(arr))
+
+
+def _softmax(value: np.ndarray, *, axis: int) -> np.ndarray:
+    shifted = value - np.max(value, axis=axis, keepdims=True)
+    exp = np.exp(shifted)
+    return exp / np.sum(exp, axis=axis, keepdims=True)
+
+
 def _to_numpy(value: Any) -> np.ndarray:
     if hasattr(value, "detach"):
         value = value.detach().cpu().numpy()
@@ -524,11 +818,16 @@ def _to_numpy(value: Any) -> np.ndarray:
 
 
 def _score_to_binary(scores: np.ndarray, *, threshold: float) -> np.ndarray:
+    return _score_to_probability(scores) >= threshold
+
+
+def _score_to_probability(scores: np.ndarray) -> np.ndarray:
     scores = np.asarray(scores)
     finite = scores[np.isfinite(scores)]
     if finite.size and (float(finite.min()) < 0.0 or float(finite.max()) > 1.0):
-        scores = 1.0 / (1.0 + np.exp(-scores))
-    return scores >= threshold
+        clipped = np.clip(scores, -60.0, 60.0)
+        return 1.0 / (1.0 + np.exp(-clipped))
+    return scores
 
 
 def _dice_from_counts(tp: int, fp: int, fn: int) -> float:
@@ -667,8 +966,367 @@ def _write_final_metrics(path: Path, summaries: list[EvaluationSummary]) -> None
         }
         for summary in summaries
     }
+    _write_json(path, payload)
+
+
+def _write_run_status(
+    path: Path,
+    *,
+    status: str,
+    completed_epoch: int,
+    interrupted_epoch: int | None = None,
+    reason: str = "",
+) -> None:
+    payload: dict[str, Any] = {
+        "status": status,
+        "completed_epoch": int(completed_epoch),
+        "reason": reason,
+    }
+    if interrupted_epoch is not None:
+        payload["interrupted_epoch"] = int(interrupted_epoch)
+    _write_json(path, payload)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)
+
+
+def _parse_export_splits(value: str) -> set[str]:
+    if value in {"", "none", "None", None}:
+        return set()
+    splits = {item.strip() for item in str(value).split(",") if item.strip()}
+    valid = {"train", "validation", "test"}
+    unknown = sorted(splits - valid)
+    if unknown:
+        raise ValueError(f"Unknown --export-predictions split(s): {', '.join(unknown)}")
+    return splits
+
+
+def _parse_export_epochs(value: str) -> set[int | str]:
+    epochs: set[int | str] = set()
+    for item in str(value).split(","):
+        item = item.strip().lower()
+        if not item:
+            continue
+        if item in {"final", "all"}:
+            epochs.add(item)
+            continue
+        epoch = int(item)
+        if epoch < 0:
+            raise ValueError("--export-prediction-epochs values must be >= 0")
+        epochs.add(epoch)
+    return epochs or {"final"}
+
+
+def _should_export_epoch(epoch: int, *, is_final: bool, export_epochs: set[int | str]) -> bool:
+    return (
+        "all" in export_epochs
+        or epoch in export_epochs
+        or (is_final and "final" in export_epochs)
+    )
+
+
+def _export_requested_predictions(
+    *,
+    model: Any,
+    torch: Any,
+    threshold: float,
+    run_dir: Path,
+    epoch: int,
+    is_final: bool,
+    export_splits: set[str],
+    export_epochs: set[int | str],
+    export_limit: int,
+    train_data: Any | None,
+    val_data: Any | None,
+    test_data: Any | None,
+) -> None:
+    should_export = _should_export_epoch(
+        epoch,
+        is_final=is_final,
+        export_epochs=export_epochs,
+    )
+    if not export_splits or not should_export:
+        return
+    split_data = {
+        "train": train_data,
+        "validation": val_data,
+        "test": test_data,
+    }
+    label = "final" if is_final else f"epoch_{epoch:03d}"
+    for split in sorted(export_splits):
+        data = split_data[split]
+        if data is None:
+            continue
+        _export_predictions_for_split(
+            model=model,
+            data=data,
+            torch=torch,
+            threshold=threshold,
+            run_dir=run_dir,
+            out_dir=run_dir / "prediction_exports" / split / label,
+            split=split,
+            epoch=epoch,
+            label=label,
+            limit=export_limit,
+        )
+
+
+def _export_predictions_for_split(
+    *,
+    model: Any,
+    data: Any,
+    torch: Any,
+    threshold: float,
+    run_dir: Path,
+    out_dir: Path,
+    split: str,
+    epoch: int,
+    label: str,
+    limit: int,
+) -> None:
+    model.eval()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    records = []
+    with torch.no_grad():
+        for index in range(min(len(data), limit)):
+            x, y, case_id = data[index]
+            pred = model(x)[0]
+            case_id_text = _case_id_to_str(case_id)
+            record = _save_prediction_artifacts(
+                x=x,
+                y=y,
+                pred=pred,
+                data=data,
+                index=index,
+                case_id=case_id_text,
+                out_dir=out_dir / _safe_path_part(case_id_text),
+                threshold=threshold,
+            )
+            record["split"] = split
+            record["epoch"] = epoch
+            records.append(record)
+    if records:
+        _write_prediction_export_manifest(out_dir / "prediction_export_manifest.csv", records)
+        _publish_latest_qc_overlay(run_dir, records[0], split=split, epoch=epoch, label=label)
+
+
+def _publish_latest_qc_overlay(
+    run_dir: Path,
+    record: dict[str, Any],
+    *,
+    split: str,
+    epoch: int,
+    label: str,
+) -> None:
+    overlay = Path(str(record.get("overlay", "")))
+    if not overlay.exists():
+        return
+
+    split_name = _safe_path_part(split)
+    split_dest = run_dir / f"latest_{split_name}_qc_overlay.png"
+    shutil.copyfile(overlay, split_dest)
+    split_metadata = {
+        "split": split,
+        "epoch": int(epoch),
+        "label": label,
+        "case_id": record.get("case_id", ""),
+        "source_overlay": str(overlay),
+        "latest_overlay": str(split_dest),
+    }
+    _write_json(run_dir / f"latest_{split_name}_qc_overlay.json", split_metadata)
+
+    default_dest = run_dir / "latest_qc_overlay.png"
+    if split == "validation" or not default_dest.exists():
+        shutil.copyfile(overlay, default_dest)
+        default_metadata = dict(split_metadata)
+        default_metadata["latest_overlay"] = str(default_dest)
+        _write_json(run_dir / "latest_qc_overlay.json", default_metadata)
+
+
+def _save_prediction_artifacts(
+    *,
+    x: Any,
+    y: Any,
+    pred: Any,
+    data: Any,
+    index: int,
+    case_id: str,
+    out_dir: Path,
+    threshold: float,
+) -> dict[str, Any]:
+    import nibabel as nib
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pred_mask = np.squeeze(_prediction_to_binary(pred, threshold=threshold)).astype(np.uint8)
+    target_mask = np.squeeze(_target_to_binary(y)).astype(np.uint8)
+    probability = _lesion_probability_map(pred).astype(np.float32)
+
+    source_dir = _source_case_dir(data, index)
+    ref_img = _load_reference_image(source_dir, expected_shape=pred_mask.shape)
+    scan = (
+        _scan_volume_from_reference(ref_img)
+        if ref_img is not None
+        else _scan_volume_from_tensor(x)
+    )
+    if tuple(scan.shape) != tuple(pred_mask.shape):
+        scan = _scan_volume_from_tensor(x)
+    if tuple(scan.shape) != tuple(pred_mask.shape):
+        scan = np.zeros(pred_mask.shape, dtype=np.float32)
+    if ref_img is None or tuple(ref_img.shape[:3]) != tuple(pred_mask.shape):
+        ref_img = nib.Nifti1Image(np.zeros(pred_mask.shape, dtype=np.float32), np.eye(4))
+
+    _save_nifti_like(out_dir / "scan.nii.gz", scan.astype(np.float32, copy=False), ref_img)
+    _save_nifti_like(out_dir / "target_mask.nii.gz", target_mask, ref_img)
+    _save_nifti_like(out_dir / "pred_mask.nii.gz", pred_mask, ref_img)
+    _save_nifti_like(out_dir / "lesion_probability.nii.gz", probability, ref_img)
+    _write_overlay_png(out_dir / "overlay.png", scan, target_mask, pred_mask)
+    return {
+        "case_id": case_id,
+        "case_dir": str(source_dir) if source_dir is not None else "",
+        "export_dir": str(out_dir),
+        "scan": str(out_dir / "scan.nii.gz"),
+        "target_mask": str(out_dir / "target_mask.nii.gz"),
+        "pred_mask": str(out_dir / "pred_mask.nii.gz"),
+        "lesion_probability": str(out_dir / "lesion_probability.nii.gz"),
+        "overlay": str(out_dir / "overlay.png"),
+    }
+
+
+def _source_case_dir(data: Any, index: int) -> Path | None:
+    entries = getattr(data, "list", None)
+    if entries is None or index >= len(entries):
+        return None
+    raw = entries[index]
+    if isinstance(raw, (list, tuple)) and raw:
+        raw = raw[0]
+    path = Path(str(raw))
+    return path if path.is_dir() else path.parent if path.exists() else None
+
+
+def _load_reference_image(
+    source_dir: Path | None,
+    *,
+    expected_shape: tuple[int, ...],
+) -> Any | None:
+    if source_dir is None:
+        return None
+    import nibabel as nib
+
+    for name in ["scan.nii.gz", "scan.nii"]:
+        path = source_dir / name
+        if path.exists():
+            img = nib.load(str(path))
+            if tuple(img.shape[:3]) == tuple(expected_shape):
+                return img
+    return None
+
+
+def _scan_volume_from_reference(ref_img: Any) -> np.ndarray:
+    data = np.asanyarray(ref_img.dataobj)
+    return _scan_volume_from_array(data)
+
+
+def _scan_volume_from_tensor(value: Any) -> np.ndarray:
+    return _scan_volume_from_array(_to_numpy(value))
+
+
+def _scan_volume_from_array(value: np.ndarray) -> np.ndarray:
+    arr = np.squeeze(np.asarray(value))
+    if arr.ndim == 4 and arr.shape[-1] == 1:
+        arr = arr[..., 0]
+    elif arr.ndim == 4 and arr.shape[0] == 1:
+        arr = arr[0, ...]
+    elif arr.ndim == 4 and arr.shape[-1] <= 4:
+        arr = arr[..., 0]
+    elif arr.ndim == 4 and arr.shape[0] <= 4:
+        arr = arr[0, ...]
+    return np.squeeze(arr).astype(np.float32, copy=False)
+
+
+def _save_nifti_like(path: Path, data: np.ndarray, reference: Any) -> None:
+    import nibabel as nib
+
+    header = reference.header.copy()
+    header.set_data_shape(data.shape)
+    header.set_data_dtype(data.dtype)
+    zooms = tuple(float(v) for v in reference.header.get_zooms()[: data.ndim])
+    if len(zooms) == data.ndim:
+        header.set_zooms(zooms)
+    nib.save(nib.Nifti1Image(data, reference.affine, header), path)
+
+
+def _write_overlay_png(path: Path, scan: np.ndarray, target: np.ndarray, pred: np.ndarray) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    slice_index = _representative_slice(target, pred)
+    image = _normalize_for_overlay(scan[:, :, slice_index])
+    target_slice = target[:, :, slice_index].astype(bool)
+    pred_slice = pred[:, :, slice_index].astype(bool)
+    rgb = np.stack([image, image, image], axis=-1)
+    rgb[target_slice, 1] = 1.0
+    rgb[target_slice, 0] *= 0.35
+    rgb[target_slice, 2] *= 0.35
+    rgb[pred_slice, 0] = 1.0
+    rgb[pred_slice, 1] *= 0.35
+    rgb[pred_slice, 2] *= 0.35
+    overlap = np.logical_and(target_slice, pred_slice)
+    rgb[overlap] = np.array([1.0, 1.0, 0.0])
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(np.rot90(rgb), interpolation="nearest")
+    ax.set_title(f"slice {slice_index}: target green, prediction red, overlap yellow")
+    ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
+
+def _representative_slice(target: np.ndarray, pred: np.ndarray) -> int:
+    counts = target.astype(bool).sum(axis=(0, 1)) + pred.astype(bool).sum(axis=(0, 1))
+    return int(np.argmax(counts)) if counts.size else 0
+
+
+def _normalize_for_overlay(image: np.ndarray) -> np.ndarray:
+    image = np.asarray(image, dtype=np.float32)
+    finite = image[np.isfinite(image)]
+    if finite.size == 0:
+        return np.zeros_like(image, dtype=np.float32)
+    lo, hi = np.percentile(finite, [1, 99])
+    if hi <= lo:
+        return np.zeros_like(image, dtype=np.float32)
+    return np.clip((image - lo) / (hi - lo), 0.0, 1.0)
+
+
+def _safe_path_part(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in value)
+    return cleaned.strip("._") or "case"
+
+
+def _write_prediction_export_manifest(path: Path, records: list[dict[str, Any]]) -> None:
+    columns = [
+        "epoch",
+        "split",
+        "case_id",
+        "case_dir",
+        "export_dir",
+        "scan",
+        "target_mask",
+        "pred_mask",
+        "lesion_probability",
+        "overlay",
+    ]
+    with path.open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(records)
 
 
 def _write_metric_plots(run_dir: Path) -> None:
@@ -690,6 +1348,7 @@ def _write_metric_plots(run_dir: Path) -> None:
         _plot_loss_curves(run_dir / "loss_curves.png", training_loss, epoch_rows, plt)
     if epoch_rows:
         _plot_metric_curves(run_dir / "validation_metric_curves.png", epoch_rows, plt)
+        _plot_voxel_count_curves(run_dir / "voxel_count_curves.png", epoch_rows, plt)
         _plot_final_metric_bars(run_dir / "final_metric_summary.png", epoch_rows, plt)
 
 
@@ -777,6 +1436,34 @@ def _plot_metric_curves(path: Path, rows: list[dict[str, Any]], plt: Any) -> Non
     fig.suptitle("Segmentation Metrics During Training", y=1.02)
     fig.tight_layout()
     fig.savefig(path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_voxel_count_curves(path: Path, rows: list[dict[str, Any]], plt: Any) -> None:
+    split_rows = _rows_for_split(rows, "validation")
+    if not split_rows:
+        return
+    epochs = [row["epoch"] for row in split_rows]
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+
+    axes[0].plot(epochs, [row["target_voxels"] for row in split_rows], label="target voxels")
+    axes[0].plot(epochs, [row["pred_voxels"] for row in split_rows], label="pred voxels")
+    axes[0].set_xlabel("Epoch")
+    axes[0].set_ylabel("Voxel count")
+    axes[0].set_title("Validation Lesion Voxels")
+    axes[0].grid(alpha=0.25)
+    axes[0].legend()
+
+    axes[1].plot(epochs, [row.get("precision_mean", 0.0) for row in split_rows], label="precision")
+    axes[1].plot(epochs, [row.get("recall_mean", 0.0) for row in split_rows], label="recall")
+    axes[1].set_xlabel("Epoch")
+    axes[1].set_ylim(0.0, 1.0)
+    axes[1].set_title("Validation Precision/Recall")
+    axes[1].grid(alpha=0.25)
+    axes[1].legend()
+
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
     plt.close(fig)
 
 

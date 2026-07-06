@@ -108,10 +108,18 @@ Current handoff state, 2026-07-06:
   Colab packages to solve this.
 - Current local verification after that fix:
   - `make lint` passed.
-  - `make test` passed with 53 tests.
+  - `make test` passed with 57 tests.
   - A synthetic one-case end-to-end training smoke test against a fresh
     upstream `jmlipman/RatLesNetv2` clone completed and saved
     `RatLesNetv2.model`.
+- First real Stage 1 external-adaptation signal is weak/negative on LYS
+  validation. With external mouse train, LYS validation, upstream rat
+  `homogeneous/model-1`, `CrossEntropyDiceLoss`, Adam, `lr=1e-4`, and
+  `--eval-every 1`, validation Dice peaked early at epoch 2 (`0.03021`) and
+  then fell by epoch 8 (`0.00750`) while training loss decreased and accuracy
+  stayed around `0.995`. Treat this as likely negative transfer or overly
+  conservative/background-dominated prediction until overlays and voxel counts
+  prove otherwise.
 
 1. Download external public archives outside git if public mouse adaptation is
    being used.
@@ -164,11 +172,63 @@ Immediate next actions in a new session:
 4. After both smoke tests pass, create proper split folders from the prepared
    tarballs with `ratlesnetv2_finetune.scripts.split_prepared_dataset`:
    external `train`, and LYS `train + validation + test`.
-5. Run external mouse adaptation first with LYS validation monitoring, then LYS
-   fine-tuning with `--test`.
-   `scripts/finetune_ratlesnetv2.py` writes `metrics_epoch.csv`,
-   `metrics_cases.csv`, and `final_metrics.json`; final performance must be
-   reported only from the held-out LYS `test` split.
+5. Do not treat external mouse adaptation as a default 50-epoch stage. First
+   run the original rat model on LYS validation with no training, then run
+   direct rat-to-LYS fine-tuning. Only keep external adaptation if a short,
+   low-LR external bridge improves downstream LYS validation performance.
+6. `scripts/finetune_ratlesnetv2.py` writes `metrics_epoch.csv`,
+   `metrics_cases.csv`, plots, and `final_metrics.json`; final performance
+   must be reported only from the held-out LYS `test` split after model
+   selection is complete.
+
+## Revised Experiment Plan After Stage 1 Metrics
+
+The project objective is not to maximize Stage 1 validation alone. It is to
+maximize final LYS lesion-segmentation performance while preserving a held-out
+LYS test set. Based on the first Stage 1 curve, use this order:
+
+1. **Run 0: rat baseline, no training.** Evaluate the upstream RatLesNetV2
+   checkpoint directly on LYS validation. This establishes whether external
+   adaptation improves or worsens the starting point.
+2. **Run 1: direct LYS fine-tuning baseline.** Start from upstream rat weights
+   and train on LYS train with LYS validation. Use a lower fine-tuning LR
+   first (`5e-5`, then `1e-5` if needed). This is the main baseline.
+3. **Run 2: short external adaptation.** Start from rat weights, train external
+   mouse for about 5 epochs at `5e-5`, validate on LYS validation, and keep
+   only `best_by_validation_dice.model`.
+4. **Run 3: very gentle external adaptation.** Repeat with about 10 epochs at
+   `1e-5`.
+5. **Run 4: LYS fine-tuning after the best short external bridge.** Compare
+   this against direct rat-to-LYS fine-tuning using LYS validation. Use LYS
+   test only once the strategy is chosen.
+
+Keep external mouse adaptation only if:
+
+```text
+rat -> short external bridge -> LYS fine-tuning
+```
+
+beats:
+
+```text
+rat -> LYS fine-tuning
+```
+
+on LYS validation, and then confirms on held-out LYS test.
+
+Immediate tooling priorities:
+
+- Save `best_by_validation_dice.model`, `best_by_validation_loss.model`, and
+  `last.model`.
+- Handle Ctrl-C gracefully in Colab by writing `interrupted.model`,
+  `last.model`, and `run_status.json` before exiting.
+- Add early stopping based on validation Dice.
+- Export selected validation/test prediction masks and overlay PNGs for visual
+  QC, including a root-level `latest_qc_overlay.png` for quick Colab display.
+- Plot `pred_voxels` vs `target_voxels`, recall, and precision so background
+  collapse is visible quickly.
+- Later, add optional second validation input for simultaneous external-val and
+  LYS-val monitoring, plus multi-threshold/probability-map diagnostics.
 
 ## Current Limitations
 
@@ -191,6 +251,10 @@ Immediate next actions in a new session:
   does not load the rat-trained weights. Real fine-tuning must pass
   `--pretrained-model /path/to/RatLesNetv2.model`; add `--require-pretrained`
   to fail loudly if the weights path is missing.
+- The first Stage 1 long-run trend suggests `lr=1e-4` for 50 external epochs
+  is too aggressive or not transferring. Avoid relying on final epoch-50
+  external checkpoints until best-by-Dice checkpointing and overlays have been
+  reviewed.
 
 ## Acceptance For This Branch Setup
 

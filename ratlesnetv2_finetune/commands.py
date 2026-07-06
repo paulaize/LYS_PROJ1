@@ -32,9 +32,16 @@ def build_cloud_command_plan(
     gpu: int = 0,
     load_memory: int = 0,
     save_every: int | None = None,
+    eval_only: bool = False,
     eval_every: int | None = None,
     eval_train: bool = False,
     metrics_threshold: float | None = None,
+    no_plots: bool = False,
+    early_stop_patience: int | None = None,
+    early_stop_min_delta: float | None = None,
+    export_predictions: str | None = None,
+    export_prediction_limit: int | None = None,
+    export_prediction_epochs: str | None = None,
     max_train_cases: int | None = None,
     max_validation_cases: int | None = None,
     max_test_cases: int | None = None,
@@ -72,12 +79,26 @@ def build_cloud_command_plan(
         finetune_command.append("--require-pretrained")
     if save_every is not None:
         finetune_command.extend(["--save-every", str(save_every)])
+    if eval_only:
+        finetune_command.append("--eval-only")
     if eval_every is not None:
         finetune_command.extend(["--eval-every", str(eval_every)])
     if eval_train:
         finetune_command.append("--eval-train")
     if metrics_threshold is not None:
         finetune_command.extend(["--metrics-threshold", str(metrics_threshold)])
+    if no_plots:
+        finetune_command.append("--no-plots")
+    if early_stop_patience is not None:
+        finetune_command.extend(["--early-stop-patience", str(early_stop_patience)])
+    if early_stop_min_delta is not None:
+        finetune_command.extend(["--early-stop-min-delta", str(early_stop_min_delta)])
+    if export_predictions:
+        finetune_command.extend(["--export-predictions", export_predictions])
+    if export_prediction_limit is not None:
+        finetune_command.extend(["--export-prediction-limit", str(export_prediction_limit)])
+    if export_prediction_epochs:
+        finetune_command.extend(["--export-prediction-epochs", export_prediction_epochs])
     if max_train_cases is not None:
         finetune_command.extend(["--max-train-cases", str(max_train_cases)])
     if max_validation_cases is not None:

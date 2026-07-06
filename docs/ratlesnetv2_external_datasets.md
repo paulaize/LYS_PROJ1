@@ -381,13 +381,16 @@ The full training pipeline should become:
 10. Create explicit split folders; do not use the smoke-test all-train split
     for performance evaluation. The current prepared tarballs can be split
     with `python -m ratlesnetv2_finetune.scripts.split_prepared_dataset`.
-    Use external mouse as `train + validation` for adaptation, and LYS as
-    `train + validation + test` for target-domain fine-tuning/evaluation.
+    Use external mouse as a train source for short adaptation experiments, and
+    LYS as `train + validation + test` for target-domain fine-tuning and final
+    evaluation. LYS validation, not external validation, is the primary signal
+    for deciding whether external adaptation transfers.
 11. Add selected source folders to the RatLesNetV2 YAML plan.
 12. Export the harmonized RatLesNetV2 dataset under `work/`.
 13. Upload prepared dataset + repo branch + optional pretrained weights to Colab.
-14. Public mouse training/adaptation stage.
-15. LYS fine-tuning stage.
+14. Baseline rat-on-LYS validation and direct rat-to-LYS fine-tuning baseline.
+15. Optional short/gentle public mouse adaptation stage only if it improves
+    downstream LYS fine-tuning.
 16. Held-out LYS evaluation with the finetuning script's
     `metrics_epoch.csv`, `metrics_cases.csv`, and `final_metrics.json`.
 17. Bring predictions back locally.
