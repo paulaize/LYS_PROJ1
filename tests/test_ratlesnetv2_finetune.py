@@ -16,6 +16,14 @@ from ratlesnetv2_finetune.scripts.orient_external_dataset_lsp import (
     affine_for_axcodes,
     relabel_pair_to_axcodes,
 )
+from ratlesnetv2_finetune.scripts.review_lys_masks_itksnap import (
+    case_from_mask,
+    default_output_root,
+    find_cases,
+    prepare_case,
+    validate_grid,
+    wait_for_next_case,
+)
 from ratlesnetv2_finetune.source_folders import add_source_folder_to_plan
 
 SPACING = (0.07, 0.07, 0.5)
@@ -247,6 +255,72 @@ def test_add_source_folder_requires_matching_lesion_masks(tmp_path):
         )
 
 
+def test_review_lys_masks_prepares_editable_copy_without_touching_source(tmp_path):
+    source_root = tmp_path / "LYS_RatLesNetV2_clean_source" / "ratlesnetv2_clean_source"
+    scan_dir = source_root / "T2w"
+    mask_dir = source_root / "masks"
+    scan_dir.mkdir(parents=True)
+    mask_dir.mkdir()
+    scan = scan_dir / "BD_01_24h.nii.gz"
+    mask = mask_dir / "BD_01_24h_lesion_mask.nii.gz"
+    _write_nifti(scan, np.ones((8, 9, 3), dtype=np.float32))
+    label = np.zeros((8, 9, 3), dtype=np.uint8)
+    label[2:4, 3:5, 1] = 1
+    _write_nifti(mask, label)
+
+    output_root = default_output_root(source_root)
+    cases = find_cases(source_root=source_root, output_root=output_root, filters=["BD_01"])
+
+    assert len(cases) == 1
+    assert case_from_mask(mask) == "BD_01_24h"
+    record = prepare_case(cases[0], copy_scans=True)
+
+    reviewed_scan = output_root / "T2w" / "BD_01_24h.nii.gz"
+    reviewed_mask = output_root / "masks" / "BD_01_24h_lesion_mask.nii.gz"
+    assert record["status"] == "copied_source_mask"
+    assert record["scan_status"] == "copied_scan"
+    assert reviewed_scan.exists()
+    assert reviewed_mask.exists()
+    validate_grid(reviewed_scan, reviewed_mask)
+    assert np.array_equal(np.asanyarray(nib.load(mask).dataobj), label)
+    edited = np.zeros_like(label)
+    _write_nifti(reviewed_mask, edited)
+    assert int((np.asanyarray(nib.load(mask).dataobj) > 0).sum()) == int(label.sum())
+
+
+def test_review_lys_masks_rejects_shape_mismatch(tmp_path):
+    source_root = tmp_path / "ratlesnetv2_clean_source"
+    scan_dir = source_root / "T2w"
+    mask_dir = source_root / "masks"
+    scan_dir.mkdir(parents=True)
+    mask_dir.mkdir()
+    _write_nifti(scan_dir / "BD_01.nii.gz", np.ones((8, 9, 3), dtype=np.float32))
+    _write_nifti(mask_dir / "BD_01_lesion_mask.nii.gz", np.zeros((8, 9, 4), dtype=np.uint8))
+    cases = find_cases(source_root=source_root, output_root=default_output_root(source_root))
+
+    with pytest.raises(ValueError, match="Shape mismatch"):
+        prepare_case(cases[0], copy_scans=True)
+
+
+def test_review_lys_masks_waits_for_viewer_when_stdin_is_unavailable(monkeypatch):
+    class FakeProcess:
+        waited = False
+
+        def wait(self):
+            self.waited = True
+            return 0
+
+    def raise_eof(_prompt):
+        raise EOFError
+
+    process = FakeProcess()
+    monkeypatch.setattr("builtins.input", raise_eof)
+
+    wait_for_next_case(process, "prompt")
+
+    assert process.waited
+
+
 def test_relabel_pair_to_lsp_preserves_voxels_and_updates_affine(tmp_path):
     scan = tmp_path / "scan.nii.gz"
     mask = tmp_path / "mask.nii.gz"
@@ -335,6 +409,7 @@ def test_flip_pair_axis_preserves_affine_and_flips_scan_mask(tmp_path):
     assert np.array_equal(np.asanyarray(saved_scan.dataobj), data[:, ::-1, :])
     assert np.array_equal(np.asanyarray(saved_mask.dataobj), label[:, ::-1, :])
     assert int(record["mask_voxels"]) == int(label.sum())
+    assert record["qc_flag"] == "needs_visual_qc_lsp_si_flip"
     assert record["si_flip_transform"] == "voxel_array_flip_axis_1_keep_affine"
 
 

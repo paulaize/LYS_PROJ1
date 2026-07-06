@@ -1,6 +1,6 @@
 # RatLesNetV2 External Mouse Datasets
 
-Last updated: 2026-07-01
+Last updated: 2026-07-03
 
 This note records the public mouse T2w stroke MRI datasets identified for the
 RatLesNetV2 transfer-learning branch, how they overlap, what files should be
@@ -72,8 +72,8 @@ superior/inferior axis. Opening these files therefore places the coronal stack
 in the transverse viewer. Relabeling the header orientation to `LSP` puts the
 stack in the expected coronal viewer.
 
-Use the separate orientation-normalized copy before importing external data for
-training:
+Use the separate orientation-normalized copies before importing external data
+for training. First create the LSP header-normalized intermediate:
 
 ```bash
 make ratlesnetv2-orient-external-lsp \
@@ -87,6 +87,36 @@ the same affine is applied to each lesion mask. The 2026-07-01 verification
 found 426 `LSP` scan/mask pairs with unchanged shapes, binary masks, and
 unchanged lesion voxel counts. All rows remain marked
 `needs_visual_qc_lsp_orientation` until inspected.
+
+Visual review then showed the LSP copy was still superior/inferior upside down
+relative to the LYS images. The confirmed fix is a voxel-array flip along axis
+1, applied identically to each scan and mask while preserving the LSP
+affine/header:
+
+```bash
+make ratlesnetv2-flip-external-si \
+  RUN_ARGS="--external-root /Volumes/Untitled/external_datasets --output-source-root /Volumes/Untitled/external_datasets/ratlesnetv2_clean_source_LSP_SI_flipped --output-manifest /Volumes/Untitled/external_datasets/manifests/external_dataset_manifest_LSP_SI_flipped.csv --all --overwrite"
+```
+
+This writes `ratlesnetv2_clean_source_LSP_SI_flipped/` and
+`manifests/external_dataset_manifest_LSP_SI_flipped.csv`. This is the current
+recommended non-Mulder external source folder for RatLesNetV2 import. The
+2026-07-03 full verification found 426 scan/mask pairs with zero technical
+problems:
+
+| Dataset | Shape | Count |
+|---|---:|---:|
+| `An2022` | `256 x 256 x 32` | 331 |
+| `Knab2025` | `256 x 256 x 32` | 45 |
+| `Knab2025` | `192 x 192 x 32` | 35 |
+| `Koch2017` | `256 x 256 x 32` | 15 |
+
+All outputs are `LSP`, scan/mask affines match, shapes are unchanged, masks are
+binary, lesion voxel counts are unchanged, and every output is exactly the
+axis-1 flip of the corresponding `ratlesnetv2_clean_source_LSP_oriented/`
+input. Keep the QC flag until representative final cases have been visually
+checked, but use this S/I-flipped folder rather than the original cleaned
+source or the LSP-only intermediate for external training.
 
 ## Overlap Findings
 
@@ -324,22 +354,35 @@ The full training pipeline should become:
 ```text
 1. Download external archives outside git and clean them with:
    `make ratlesnetv2-download-external RUN_ARGS="--output-root /Volumes/Untitled/external_datasets --include-mulder --delete-archives"`.
-2. Use `/Volumes/Untitled/external_datasets/ratlesnetv2_clean_source/` as the
-   external source-folder import. It contains only selected image/mask pairs
-   plus manifests under `/Volumes/Untitled/external_datasets/manifests/`.
-3. Convert LYS Fiji RoiSet.zip annotations to *_lesion_mask.nii.gz.
-4. Build a geometry/provenance report for all candidates.
-5. Deduplicate public records and select manual native labels.
-6. Add selected source folders to the RatLesNetV2 YAML plan.
-7. Export the harmonized RatLesNetV2 dataset under work/.
-8. Upload prepared dataset + repo branch + optional pretrained weights to Colab.
-9. Cloud smoke test: 1 case, 1 epoch.
-10. Public mouse training/adaptation stage.
-11. LYS fine-tuning stage.
-12. Held-out LYS evaluation.
-13. Bring predictions back locally.
-14. Human-review predicted masks.
-15. Use reviewed masks for lesion volume and downstream v1/v2 outputs.
+2. Create the LSP intermediate with `make ratlesnetv2-orient-external-lsp`.
+3. Create the final S/I-flipped external folder with
+   `make ratlesnetv2-flip-external-si ... --all --overwrite`.
+4. Use
+   `/Volumes/Untitled/external_datasets/ratlesnetv2_clean_source_LSP_SI_flipped/`
+   as the external source-folder import. It contains only selected non-Mulder
+   image/mask pairs plus manifests under
+   `/Volumes/Untitled/external_datasets/manifests/`.
+5. Convert LYS Fiji RoiSet.zip annotations to `*_lesion_mask.nii.gz`.
+6. Review/edit LYS mask copies with `make ratlesnetv2-review-lys-masks`; use
+   `~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed/`
+   as the LYS source-folder import.
+7. For the immediate Colab smoke test, add the reviewed LYS source folder to a
+   local YAML plan as `train`, export `LYS_T2w_manual_v0` under `work/`, upload
+   `LYS_T2w_manual_v0.tar.gz` to Google Drive, and run one case for one epoch.
+   This verifies the runtime/data contract only.
+8. Build a geometry/provenance report for all candidates.
+9. Deduplicate public records and select manual native labels.
+10. Create explicit train/validation/test splits; do not use the smoke-test
+    all-train split for performance evaluation.
+11. Add selected source folders to the RatLesNetV2 YAML plan.
+12. Export the harmonized RatLesNetV2 dataset under `work/`.
+13. Upload prepared dataset + repo branch + optional pretrained weights to Colab.
+14. Public mouse training/adaptation stage.
+15. LYS fine-tuning stage.
+16. Held-out LYS evaluation.
+17. Bring predictions back locally.
+18. Human-review predicted masks.
+19. Use reviewed masks for lesion volume and downstream v1/v2 outputs.
 ```
 
 Google Colab free tier should be adequate for smoke tests and small fine-tunes.

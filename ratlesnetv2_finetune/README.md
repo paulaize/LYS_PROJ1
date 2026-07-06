@@ -97,10 +97,11 @@ cases, and writes:
 └── README.md
 ```
 
-`ratlesnetv2_clean_source/` is directly compatible with the source-folder
-importer below. Keep `--include-mulder` only when you want the lower-resolution
-Mulder T2-map/IAM manual-mask pairs included; omit it for the stricter
-T2w-native An/Knab/Koch adaptation set.
+`ratlesnetv2_clean_source/` is the raw cleaned source folder. For external
+training, use the orientation-normalized non-Mulder copy described below rather
+than importing this folder directly. Keep `--include-mulder` only when you want
+the lower-resolution Mulder T2-map/IAM manual-mask pairs included for later
+manual review; omit it for the stricter T2w-native An/Knab/Koch adaptation set.
 
 The 2026-07-01 run on `/Volumes/Untitled/external_datasets` exported 547 pairs:
 331 `An2022`, 80 non-duplicate `Knab2025`, 15 recoverable `Koch2017`, and 121
@@ -134,6 +135,34 @@ is excluded by default because it is lower-resolution T2-map data rather than
 normal T2w source data. The 2026-07-01 verification found 426 `LSP` scan/mask
 pairs with unchanged shapes, binary masks, and unchanged lesion voxel counts.
 All oriented rows remain marked `needs_visual_qc_lsp_orientation`.
+
+Visual review then showed the coronal stack and mask overlays were still
+superior/inferior upside down relative to the LYS images. After a three-case
+test was confirmed in ITK-SNAP, create the final external source copy by
+flipping the LSP voxel arrays along axis 1 while preserving the LSP
+affine/header:
+
+```bash
+make ratlesnetv2-flip-external-si \
+  RUN_ARGS="--external-root /Volumes/Untitled/external_datasets --output-source-root /Volumes/Untitled/external_datasets/ratlesnetv2_clean_source_LSP_SI_flipped --output-manifest /Volumes/Untitled/external_datasets/manifests/external_dataset_manifest_LSP_SI_flipped.csv --all --overwrite"
+```
+
+This writes the source folder that should be used for non-Mulder external
+training import:
+
+```text
+/Volumes/Untitled/external_datasets/
+├── ratlesnetv2_clean_source_LSP_SI_flipped/
+│   ├── T2w/
+│   └── masks/
+└── manifests/external_dataset_manifest_LSP_SI_flipped.csv
+```
+
+The 2026-07-03 full run exported 426 scan/mask pairs: 331 `An2022`, 80
+`Knab2025`, and 15 `Koch2017`. Verification found zero technical problems:
+all outputs are `LSP`, scan/mask affines match, shapes are unchanged, masks are
+binary, lesion voxel counts are unchanged, and every output is exactly the
+axis-1 flip of the corresponding LSP-oriented input.
 
 ## Local Source Folder Import
 
@@ -239,6 +268,117 @@ guessed. Typical reasons are ambiguous Bruker study matches, duplicate case
 IDs, ambiguous T2 scan selection, or a local conversion failure. Resolve those
 manually before using them for training.
 
+## Review And Edit LYS Masks In ITK-SNAP
+
+The RoiSet-converted LYS masks should be visually checked before they become
+training labels. Use the ITK-SNAP review helper to create editable mask copies
+in a reviewed source folder and open them with the matching T2w image:
+
+```bash
+make ratlesnetv2-review-lys-masks \
+  RUN_ARGS="--source-root ~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source --case C1S1 --limit 1 --dry-run"
+```
+
+Run without `--dry-run` to create the reviewed folder and launch ITK-SNAP:
+
+```bash
+make ratlesnetv2-review-lys-masks \
+  RUN_ARGS="--source-root ~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source --case C1S1 --limit 1"
+```
+
+By default this writes:
+
+```text
+~/Desktop/LYS_RatLesNetV2_clean_source/
+├── ratlesnetv2_clean_source/          # original generated source, not edited
+└── ratlesnetv2_clean_source_reviewed/
+    ├── T2w/                           # scan symlinks by default
+    ├── masks/                         # editable mask copies
+    └── manifests/mask_review_queue.csv
+```
+
+Open masks one case at a time, use the ITK-SNAP segmentation brush/eraser, and
+save the mask. Then press Enter in the terminal to open the next case. If the
+terminal cannot read Enter through `conda run`, the script waits for you to
+close the ITK-SNAP window after saving, then opens the next case. Existing
+reviewed masks are preserved by default, so rerunning the command continues
+from the current reviewed copy. Useful options:
+
+```bash
+# Queue every case after checking the dry run.
+make ratlesnetv2-review-lys-masks \
+  RUN_ARGS="--source-root ~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source"
+
+# Skip cases that already have a reviewed mask copy.
+make ratlesnetv2-review-lys-masks \
+  RUN_ARGS="--skip-existing"
+
+# Copy scans instead of symlinking them, useful before moving the reviewed folder.
+make ratlesnetv2-review-lys-masks \
+  RUN_ARGS="--copy-scans --prepare-only"
+```
+
+After review, import
+`~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed/`
+with `ratlesnetv2-add-source`, not the original unreviewed source folder.
+Pass `--viewer /Applications/ITK-SNAP.app/Contents/MacOS/ITK-SNAP` if the
+script cannot discover ITK-SNAP automatically.
+
+## First LYS Colab Smoke-Test Dataset
+
+For the first Colab run, keep the target deliberately small: prepare the
+reviewed LYS source folder locally, upload one tarball to Google Drive, then
+run a one-case/one-epoch cloud smoke test. This confirms that the prepared
+folder, upstream RatLesNetV2 checkout, CUDA runtime, and training wrapper all
+work together.
+
+This is **not** the final scientific split. The commands below put all reviewed
+LYS cases into `train` and then limit the cloud run with `--max-train-cases 1`.
+Before a real finetune/evaluation, create explicit train/validation/test
+splits and reserve held-out LYS animals for validation/test.
+
+Current local source folder for this smoke test:
+
+```text
+~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed/
+├── T2w/
+└── masks/
+```
+
+Prepare the local YAML plan:
+
+```bash
+cp ratlesnetv2_finetune/configs/dataset_from_folders_template.yml \
+  ratlesnetv2_finetune/configs/local_lys_reviewed.yml
+```
+
+Add the reviewed LYS source folder:
+
+```bash
+make ratlesnetv2-add-source \
+  RATLESNET_CONFIG=ratlesnetv2_finetune/configs/local_lys_reviewed.yml \
+  RUN_ARGS="--source-root ~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed --split train --study LYS --timepoint mixed --scan-subdir T2w --mask-subdir masks"
+```
+
+Build the RatLesNetV2-ready dataset:
+
+```bash
+make ratlesnetv2-prepare \
+  RATLESNET_CONFIG=ratlesnetv2_finetune/configs/local_lys_reviewed.yml \
+  RUN_ARGS="--overwrite"
+```
+
+Package it for upload to Google Drive:
+
+```bash
+tar -C work/ratlesnetv2_finetune/datasets \
+  -czf ~/Desktop/LYS_T2w_manual_v0.tar.gz \
+  LYS_T2w_manual_v0
+```
+
+Upload `~/Desktop/LYS_T2w_manual_v0.tar.gz` to Google Drive. The cloud runtime
+does not need the original Desktop source folder once this tarball exists.
+
 Start from a local, gitignored dataset plan:
 
 ```bash
@@ -313,6 +453,9 @@ tar -C work/ratlesnetv2_finetune/datasets \
   LYS_T2w_manual_v0
 ```
 
+For Google Drive upload, it is usually simpler to write the tarball to the
+Desktop as shown in the first smoke-test recipe.
+
 ## Cloud Run Plan
 
 For Colab/cloud training, import only:
@@ -329,11 +472,16 @@ Print cloud commands locally:
 
 ```bash
 make ratlesnetv2-cloud-plan \
-  RATLESNET_CONFIG=ratlesnetv2_finetune/configs/local_dataset.yml \
-  RUN_ARGS="--cloud-dataset-root /content/LYS_T2w_manual_v0 --epochs 1 --max-train-cases 1 --save-every 1"
+  RATLESNET_CONFIG=ratlesnetv2_finetune/configs/local_lys_reviewed.yml \
+  RUN_ARGS="--cloud-dataset-root /content/LYS_T2w_manual_v0 --cloud-output /content/drive/MyDrive/ratlesnet_runs --epochs 1 --max-train-cases 1 --save-every 1"
 ```
 
 Minimal Colab command sequence:
+
+```python
+from google.colab import drive
+drive.mount("/content/drive")
+```
 
 ```bash
 git clone --branch dl-ratlesnetv2-finetune <your-repo-url> /content/LYS_PROJ1
@@ -342,7 +490,13 @@ pip install -r ratlesnetv2_finetune/requirements-colab.txt
 git clone --depth 1 https://github.com/jmlipman/RatLesNetv2.git /content/RatLesNetv2
 ```
 
-Copy or extract the prepared dataset so this folder exists:
+Extract the prepared dataset from Google Drive:
+
+```bash
+tar -xzf /content/drive/MyDrive/LYS_T2w_manual_v0.tar.gz -C /content
+```
+
+Then this folder should exist:
 
 ```text
 /content/LYS_T2w_manual_v0/
@@ -358,7 +512,7 @@ One-case cloud smoke test:
 python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --ratlesnet-repo /content/RatLesNetv2 \
   --input /content/LYS_T2w_manual_v0/train \
-  --output /content/ratlesnet_runs \
+  --output /content/drive/MyDrive/ratlesnet_runs \
   --epochs 1 \
   --lr 1e-4 \
   --gpu 0 \
@@ -366,6 +520,9 @@ python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --max-train-cases 1 \
   --save-every 1
 ```
+
+This is useful for confirming the runtime and data contract only. Do not
+interpret the one-case loss as model performance.
 
 If the YAML has validation cases and the prepared dataset contains a validation
 folder, add:
@@ -381,7 +538,7 @@ python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --ratlesnet-repo /content/RatLesNetv2 \
   --input /content/LYS_T2w_manual_v0/train \
   --validation /content/LYS_T2w_manual_v0/validation \
-  --output /content/ratlesnet_runs \
+  --output /content/drive/MyDrive/ratlesnet_runs \
   --pretrained-model /content/pretrained/RatLesNetv2.model \
   --epochs 100 \
   --lr 1e-4 \
@@ -416,7 +573,8 @@ Omit `--validation` if there is no validation split. Omit
    `An2022`, `Knab2025`, `Koch2017`, and optionally `Mulder2017`.
 3. Deduplicate public cases before export, especially `An2022` vs `Knab2025`
    and `An2022` vs full `Mulder2017`.
-4. Run the one-case cloud smoke test, then public-mouse adaptation, then LYS
-   fine-tuning.
-5. Bring predictions back through the existing human review gate and compare
+4. Run the one-case cloud smoke test.
+5. Create explicit train/validation/test splits with held-out LYS animals.
+6. Run public-mouse adaptation, then LYS fine-tuning.
+7. Bring predictions back through the existing human review gate and compare
    draft-vs-corrected Dice before using any neural-network lesion volume.

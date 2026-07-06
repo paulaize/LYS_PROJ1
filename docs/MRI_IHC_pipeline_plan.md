@@ -294,7 +294,8 @@ Swap threshold→trained classifier; batch all animals; YAML configs; QC logging
 overlay figures. Only now consider deep-learning lesion segmentation if scale
 justifies it. The current RatLesNetV2 transfer-learning notes, public mouse
 dataset overlap rules, and geometry summary live in
-`docs/ratlesnetv2_external_datasets.md`.
+`docs/ratlesnetv2_external_datasets.md`; the concrete first Colab smoke-test
+commands live in `ratlesnetv2_finetune/README.md`.
 
 Stop at the phase where accuracy is "good enough for the biology" — for a 10-animal exploratory drug-distribution study, Phase 3 with solid QC is likely the right stopping point, with Phase 4 reserved for when this becomes a recurring assay.
 

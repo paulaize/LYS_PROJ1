@@ -86,7 +86,11 @@ separate `ratlesnetv2_finetune/` folder for preparing reviewed LYS T2w masks in
 the upstream RatLesNetV2 data format and for running a cloud finetuning script.
 It is not a v1 backend. It consumes human-corrected masks from v1/later review
 passes and produces draft DL masks that must return through the same human
-review gate before volume calculations.
+review gate before volume calculations. The current first cloud step is a
+one-case/one-epoch Colab smoke test from
+`~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed/`.
+That smoke test verifies the prepared data contract and GPU runtime only; it is
+not a model-performance estimate.
 
 **External mouse data for RatLesNetV2 adaptation.** RatLesNetV2's original
 weights come from rat T2w stroke data. The external mouse datasets currently
@@ -249,7 +253,18 @@ for the *next* protocol.
 
 **RatLesNetV2 transfer-learning branch.** In parallel with the above, use
 `ratlesnetv2_finetune/` to convert corrected T2w masks to the RatLesNetV2
-folder contract and run cloud smoke tests. The intended training sequence is:
+folder contract and run cloud smoke tests. The current immediate Colab command
+path is:
+
+```text
+review LYS masks locally in ITK-SNAP
+  -> prepare `LYS_T2w_manual_v0` locally under work/
+  -> upload `LYS_T2w_manual_v0.tar.gz` to Google Drive
+  -> Colab: clone this branch + upstream RatLesNetV2
+  -> run `finetune_ratlesnetv2` with `--epochs 1 --max-train-cases 1`
+```
+
+The intended training sequence after that smoke test is:
 
 ```text
 RatLesNetV2 rat weights
@@ -260,7 +275,9 @@ RatLesNetV2 rat weights
 
 This is useful for evaluating whether RatLesNetV2 transfers to the LYS
 thrombin/surface-coil data, but it does not change the v1 rule that the
-corrected human mask is the source of truth.
+corrected human mask is the source of truth. A real finetune must not use the
+all-LYS-as-train smoke-test split for evaluation; it needs explicit
+train/validation/test splits with held-out LYS animals.
 
 Stop where accuracy is good enough for the biology. For a 10-animal exploratory study, Phases 1–3 with solid correction gates are likely the right stopping point; Phase 4 is the payoff when this becomes a recurring assay.
 

@@ -187,7 +187,12 @@ finetuning loop. The intended sequence is rat-trained RatLesNetV2 weights →
 public mouse native-space manual masks → LYS manual masks → held-out LYS
 validation. Predictions from that model are still drafts. They become
 scientific data only after the same manual correction/provenance path used by
-v1. Details are in `docs/ratlesnetv2_external_datasets.md`.
+v1. The immediate next cloud step is a one-case/one-epoch Colab smoke test
+from the reviewed LYS source folder
+`~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed/`;
+that run checks the data contract/runtime only and must not be interpreted as
+model performance. Details are in `ratlesnetv2_finetune/README.md` and
+`docs/ratlesnetv2_external_datasets.md`.
 
 ---
 

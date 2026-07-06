@@ -60,6 +60,9 @@ MPS when available rather than CUDA, but real training should happen on cloud.
   `*_lesion_mask.nii.gz` converter for polygon/freehand lesion outlines.
 - `source_folders.py`: source-folder scanner that appends matched
   `case.nii.gz` / `case_lesion_mask.nii.gz` pairs to a dataset YAML plan.
+- `scripts/review_lys_masks_itksnap.py`: opens reviewed copies of LYS T2w
+  images and masks in ITK-SNAP so masks can be lightly corrected without
+  overwriting the original cleaned source folder.
 - `scripts/add_source_folder.py`: CLI for running that scanner once per local
   source folder.
 - `scripts/prepare_dataset.py`: local dataset-preparation CLI.
@@ -84,23 +87,30 @@ Relevant documents:
    being used.
 2. Convert/import only native-space manual public masks into source-folder
    format, following `docs/ratlesnetv2_external_datasets.md`.
-3. If LYS manual lesion outlines are Fiji ROI Manager exports, run
-   `make ratlesnetv2-roiset-to-mask` first to create one
-   `case_lesion_mask.nii.gz` beside or inside the mask source folder for each
-   original `case.nii.gz`.
-4. Copy `configs/dataset_from_folders_template.yml` to a local, gitignored
-   dataset plan such as `ratlesnetv2_finetune/configs/local_dataset.yml`.
-5. Run `make ratlesnetv2-add-source` once per local source folder. Each source
-   folder should contain one T2w scan subfolder and one lesion-mask subfolder.
-   Filenames are matched as `name.nii.gz` -> `name_lesion_mask.nii.gz`.
-6. Run a geometry/provenance report before final export. External data are not
-   LYS geometry; duplicates and atlas-space masks must be excluded.
-7. Run `make ratlesnetv2-prepare` once after all folders have been added. This
-   writes one harmonized RatLesNetV2 dataset under `work/`.
-8. Upload or copy the prepared dataset folder/tarball, this repo branch, and
-   optional pretrained weights to Colab. Raw source folders are not required on
-   the cloud after the local harmonized export exists.
-9. Run the one-case cloud smoke test before any longer finetune.
+3. If LYS manual lesion outlines are Fiji ROI Manager exports, run the bulk
+   LYS RoiSet/Bruker cleanup first to create the local source folder:
+   `~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source/`.
+4. Review/edit LYS masks with `make ratlesnetv2-review-lys-masks`. This writes
+   editable copies under
+   `~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed/`.
+   Use this reviewed folder for training import, not the original unreviewed
+   source folder.
+5. For the first Colab smoke test, copy
+   `configs/dataset_from_folders_template.yml` to
+   `ratlesnetv2_finetune/configs/local_lys_reviewed.yml`.
+6. Add the reviewed LYS folder to that plan as `train`, then run
+   `make ratlesnetv2-prepare ... RUN_ARGS="--overwrite"`. This writes the
+   harmonized RatLesNetV2 dataset under `work/ratlesnetv2_finetune/datasets/`.
+7. Tar `LYS_T2w_manual_v0` and upload the tarball to Google Drive. Raw Desktop
+   source folders are not required on the cloud after the local harmonized
+   export exists.
+8. In Colab, mount Google Drive, clone this branch, install
+   `ratlesnetv2_finetune/requirements-colab.txt`, clone upstream RatLesNetV2,
+   extract the tarball to `/content`, and run one case for one epoch with
+   `--max-train-cases 1 --save-every 1`.
+9. Treat that first run as a runtime/data-contract smoke test only. Before a
+   real finetune/evaluation, create explicit train/validation/test splits and
+   reserve held-out LYS animals for validation/test.
 
 ## Current Limitations
 
