@@ -4,7 +4,7 @@ IHC ?=
 RUN_ARGS ?=
 RATLESNET_CONFIG ?= ratlesnetv2_finetune/configs/dataset_template.yml
 
-.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-threshold-sweeps ratlesnetv2-roiset-to-mask ratlesnetv2-add-source ratlesnetv2-download-external ratlesnetv2-orient-external-lsp ratlesnetv2-flip-external-si ratlesnetv2-prepare-lys-roisets ratlesnetv2-review-lys-masks ratlesnetv2-prepare ratlesnetv2-cloud-plan run clean
+.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-threshold-sweeps ratlesnetv2-roiset-to-mask ratlesnetv2-add-source ratlesnetv2-download-external ratlesnetv2-orient-external-lsp ratlesnetv2-flip-external-si ratlesnetv2-prepare-lys-roisets ratlesnetv2-review-lys-masks ratlesnetv2-prepare ratlesnetv2-split-prepared ratlesnetv2-cloud-plan run clean
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
@@ -50,6 +50,9 @@ ratlesnetv2-review-lys-masks:
 
 ratlesnetv2-prepare:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.prepare_dataset --config $(RATLESNET_CONFIG) $(RUN_ARGS)
+
+ratlesnetv2-split-prepared:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.split_prepared_dataset $(RUN_ARGS)
 
 ratlesnetv2-cloud-plan:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.plan_cloud_run --config $(RATLESNET_CONFIG) $(RUN_ARGS)

@@ -458,6 +458,33 @@ Desktop as shown in the first smoke-test recipe.
 
 ## Cloud Run Plan
 
+Current handoff state, 2026-07-06:
+
+- Prepared Colab upload archives already exist locally and have been uploaded
+  to Google Drive:
+  - `LYS_T2w_manual_v0.tar.gz`
+  - `External_Mouse_T2w_manual_LSP_SI_v0.tar.gz`
+- The prepared LYS archive contains 262 train cases:
+  - 254 cases shaped `256 x 256 x 18 x 1`
+  - 8 cases shaped `256 x 256 x 20 x 1`
+- The prepared external archive contains 426 train cases:
+  - 391 cases shaped `256 x 256 x 32 x 1`
+  - 35 cases shaped `192 x 192 x 32 x 1`
+- Both archives are currently all-train smoke-test exports. They are suitable
+  for checking that Colab, RatLesNetV2, and the data contract work. They are
+  not suitable for final model evaluation until explicit
+  train/validation/test splits are created.
+- Colab may use modern `nibabel >= 5`. Upstream RatLesNetV2 still calls the
+  removed `img.get_data()` API, so `scripts/finetune_ratlesnetv2.py` now
+  patches nibabel compatibility at runtime. Do not downgrade Colab nibabel or
+  force-reinstall old packages; restart the runtime and use this branch's
+  current script instead.
+- Local verification of the current wrapper passed:
+  - `make lint`
+  - `make test`
+  - one synthetic one-case RatLesNetV2 CPU smoke train against a fresh upstream
+    `jmlipman/RatLesNetv2` clone.
+
 For Colab/cloud training, import only:
 
 1. This repo/branch, usually by cloning it in Colab.
@@ -484,10 +511,24 @@ drive.mount("/content/drive")
 ```
 
 ```bash
-git clone --branch dl-ratlesnetv2-finetune <your-repo-url> /content/LYS_PROJ1
+git clone --branch dl-ratlesnetv2-finetune https://github.com/paulaize/LYS_PROJ1.git /content/LYS_PROJ1
 cd /content/LYS_PROJ1
 pip install -r ratlesnetv2_finetune/requirements-colab.txt
 git clone --depth 1 https://github.com/jmlipman/RatLesNetv2.git /content/RatLesNetv2
+```
+
+If the repository is private, configure a GitHub personal access token before
+the clone rather than using the interactive username/password prompt:
+
+```python
+import getpass
+import os
+from pathlib import Path
+
+token = getpass.getpass("GitHub personal access token: ").strip()
+netrc = Path("/root/.netrc")
+netrc.write_text(f"machine github.com\nlogin paulaize\npassword {token}\n")
+os.chmod(netrc, 0o600)
 ```
 
 Extract the prepared dataset from Google Drive:
@@ -506,13 +547,42 @@ Then this folder should exist:
 └── test/         # only if configured locally
 ```
 
+For a real training/evaluation run, do not train from the all-train smoke-test
+folder directly. Split the prepared folders first. Use external mouse data for
+mouse-domain adaptation and LYS data for target-domain fine-tuning plus final
+held-out evaluation:
+
+```bash
+# LYS target-domain split: train + validation + held-out test.
+python -m ratlesnetv2_finetune.scripts.split_prepared_dataset \
+  --input /content/LYS_T2w_manual_v0 \
+  --output /content/LYS_T2w_manual_v0_split \
+  --validation-fraction 0.15 \
+  --test-fraction 0.15 \
+  --seed 20260706
+
+# External mouse adaptation split: train + validation, no final test claim.
+tar -xzf /content/drive/MyDrive/External_Mouse_T2w_manual_LSP_SI_v0.tar.gz -C /content
+python -m ratlesnetv2_finetune.scripts.split_prepared_dataset \
+  --input /content/External_Mouse_T2w_manual_LSP_SI_v0 \
+  --output /content/External_Mouse_T2w_manual_LSP_SI_v0_split \
+  --validation-fraction 0.10 \
+  --test-fraction 0 \
+  --seed 20260706
+```
+
+The splitter writes a new `manifest.csv` and `split_summary.json`. It groups
+by `animal_id` by default, so repeated rows for one animal cannot leak across
+train/validation/test.
+
 One-case cloud smoke test:
 
 ```bash
+cd /content/LYS_PROJ1
 python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --ratlesnet-repo /content/RatLesNetv2 \
   --input /content/LYS_T2w_manual_v0/train \
-  --output /content/drive/MyDrive/ratlesnet_runs \
+  --output /content/drive/MyDrive/ratlesnet_runs_lys_smoke \
   --epochs 1 \
   --lr 1e-4 \
   --gpu 0 \
@@ -523,6 +593,35 @@ python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
 
 This is useful for confirming the runtime and data contract only. Do not
 interpret the one-case loss as model performance.
+
+If this LYS smoke test succeeds, run the same one-case smoke test on the
+external mouse archive:
+
+```bash
+cd /content/LYS_PROJ1
+python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
+  --ratlesnet-repo /content/RatLesNetv2 \
+  --input /content/External_Mouse_T2w_manual_LSP_SI_v0/train \
+  --output /content/drive/MyDrive/ratlesnet_runs_external_smoke \
+  --epochs 1 \
+  --lr 1e-4 \
+  --gpu 0 \
+  --loadMemory 0 \
+  --max-train-cases 1 \
+  --save-every 1
+```
+
+Common Colab failure modes already encountered:
+
+- `ExpiredDeprecationError: get_data() is deprecated`: use the current branch
+  script, which patches nibabel at runtime. Restart the runtime after any
+  attempted package downgrade, reclone this branch, and rerun. Do not
+  `pip install "nibabel<5" --force-reinstall`.
+- `Repository not found` while cloning a private repo: the GitHub token lacks
+  access to `paulaize/LYS_PROJ1` or the branch has not been pushed.
+- Argument/path typos: use normal double hyphens, for example `--gpu`, not a
+  typographic dash; use `LYS_T2w_manual_v0`, not `LYS_T2w_manual_vo`; do not
+  add spaces inside `/content/...` paths.
 
 If the YAML has validation cases and the prepared dataset contains a validation
 folder, add:
@@ -549,6 +648,56 @@ python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
 
 Omit `--validation` if there is no validation split. Omit
 `--pretrained-model` for a smoke-test training run from initialization.
+
+First full staged Colab run after the smoke tests:
+
+```bash
+# 1. External mouse adaptation. The validation metrics monitor adaptation only;
+#    they are not final evidence for LYS performance.
+python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
+  --ratlesnet-repo /content/RatLesNetv2 \
+  --input /content/External_Mouse_T2w_manual_LSP_SI_v0_split/train \
+  --validation /content/External_Mouse_T2w_manual_LSP_SI_v0_split/validation \
+  --output /content/drive/MyDrive/ratlesnet_runs_external_adapt \
+  --epochs 50 \
+  --lr 1e-4 \
+  --gpu 0 \
+  --loadMemory 0 \
+  --save-every 5 \
+  --eval-every 1
+
+# 2. LYS target-domain fine-tune and held-out test evaluation.
+#    Adjust the pretrained path if the external adaptation run number is not 1.
+python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
+  --ratlesnet-repo /content/RatLesNetv2 \
+  --input /content/LYS_T2w_manual_v0_split/train \
+  --validation /content/LYS_T2w_manual_v0_split/validation \
+  --test /content/LYS_T2w_manual_v0_split/test \
+  --output /content/drive/MyDrive/ratlesnet_runs_lys_finetune \
+  --pretrained-model /content/drive/MyDrive/ratlesnet_runs_external_adapt/1/RatLesNetv2.model \
+  --epochs 100 \
+  --lr 1e-4 \
+  --gpu 0 \
+  --loadMemory 0 \
+  --save-every 10 \
+  --eval-every 1
+```
+
+Each run directory now writes:
+
+```text
+training_loss
+validation_loss                  # when --validation is provided
+metrics_epoch.csv                # split-level loss, Dice, IoU, accuracy, etc.
+metrics_cases.csv                # per-case metrics per evaluated epoch/split
+final_metrics.json               # final validation/test summary
+RatLesNetv2.model
+```
+
+Report final model performance from the LYS `test` rows in
+`final_metrics.json` or `metrics_epoch.csv`. Training metrics and public mouse
+validation metrics are useful for debugging but are not target-domain
+performance claims.
 
 ## Data Rules
 

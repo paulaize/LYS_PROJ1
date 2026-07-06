@@ -370,16 +370,26 @@ The full training pipeline should become:
    local YAML plan as `train`, export `LYS_T2w_manual_v0` under `work/`, upload
    `LYS_T2w_manual_v0.tar.gz` to Google Drive, and run one case for one epoch.
    This verifies the runtime/data contract only.
+   As of 2026-07-06, both smoke-test tarballs have been prepared and uploaded:
+   `LYS_T2w_manual_v0.tar.gz` and
+   `External_Mouse_T2w_manual_LSP_SI_v0.tar.gz`. The first Colab run reached
+   the upstream training loop; the remaining known fix is the nibabel
+   compatibility patch now implemented in
+   `ratlesnetv2_finetune/scripts/finetune_ratlesnetv2.py`.
 8. Build a geometry/provenance report for all candidates.
 9. Deduplicate public records and select manual native labels.
-10. Create explicit train/validation/test splits; do not use the smoke-test
-    all-train split for performance evaluation.
+10. Create explicit split folders; do not use the smoke-test all-train split
+    for performance evaluation. The current prepared tarballs can be split
+    with `python -m ratlesnetv2_finetune.scripts.split_prepared_dataset`.
+    Use external mouse as `train + validation` for adaptation, and LYS as
+    `train + validation + test` for target-domain fine-tuning/evaluation.
 11. Add selected source folders to the RatLesNetV2 YAML plan.
 12. Export the harmonized RatLesNetV2 dataset under `work/`.
 13. Upload prepared dataset + repo branch + optional pretrained weights to Colab.
 14. Public mouse training/adaptation stage.
 15. LYS fine-tuning stage.
-16. Held-out LYS evaluation.
+16. Held-out LYS evaluation with the finetuning script's
+    `metrics_epoch.csv`, `metrics_cases.csv`, and `final_metrics.json`.
 17. Bring predictions back locally.
 18. Human-review predicted masks.
 19. Use reviewed masks for lesion volume and downstream v1/v2 outputs.

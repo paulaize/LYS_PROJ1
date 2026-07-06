@@ -11,7 +11,10 @@ import yaml
 from ratlesnetv2_finetune.commands import build_cloud_command_plan, format_command
 from ratlesnetv2_finetune.dataset import prepare_dataset
 from ratlesnetv2_finetune.roiset_to_nifti_mask import convert_roiset_to_nifti_mask
-from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import _patch_nibabel_get_data_compat
+from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
+    _patch_nibabel_get_data_compat,
+    _segmentation_metrics,
+)
 from ratlesnetv2_finetune.scripts.flip_external_si_axis import flip_pair_axis
 from ratlesnetv2_finetune.scripts.orient_external_dataset_lsp import (
     affine_for_axcodes,
@@ -25,6 +28,7 @@ from ratlesnetv2_finetune.scripts.review_lys_masks_itksnap import (
     validate_grid,
     wait_for_next_case,
 )
+from ratlesnetv2_finetune.scripts.split_prepared_dataset import split_prepared_dataset
 from ratlesnetv2_finetune.source_folders import add_source_folder_to_plan
 
 SPACING = (0.07, 0.07, 0.5)
@@ -192,6 +196,20 @@ def test_prepare_dataset_rejects_label_shape_mismatch(tmp_path):
         prepare_dataset(plan, repo_root=tmp_path)
 
 
+def test_prepare_dataset_rejects_duplicate_case_id_across_splits(tmp_path):
+    scan = tmp_path / "scan.nii.gz"
+    mask = tmp_path / "mask.nii.gz"
+    _write_nifti(scan, np.ones((8, 9, 3), dtype=np.float32))
+    _write_nifti(mask, np.zeros((8, 9, 3), dtype=np.uint8))
+    plan = _write_plan(tmp_path, scan, mask)
+    loaded = yaml.safe_load(plan.read_text())
+    loaded["splits"]["validation"] = [dict(loaded["splits"]["train"][0])]
+    plan.write_text(yaml.safe_dump(loaded))
+
+    with pytest.raises(ValueError, match="Duplicate case_id"):
+        prepare_dataset(plan, repo_root=tmp_path)
+
+
 def test_add_source_folder_updates_plan_and_prepares_dataset(tmp_path):
     source_root = tmp_path / "incoming_24h"
     scan_dir = source_root / "T2w"
@@ -264,6 +282,59 @@ def test_add_source_folder_requires_matching_lesion_masks(tmp_path):
             mask_subdir="lesion_masks",
             repo_root=tmp_path,
         )
+
+
+def test_split_prepared_dataset_creates_disjoint_train_validation_test(tmp_path):
+    source_dir = tmp_path / "source"
+    scan_dir = source_dir / "T2w"
+    mask_dir = source_dir / "masks"
+    scan_dir.mkdir(parents=True)
+    mask_dir.mkdir()
+    split_cases = []
+    for index in range(4):
+        case_id = f"BD_{index:02d}"
+        scan = scan_dir / f"{case_id}.nii.gz"
+        mask = mask_dir / f"{case_id}_lesion_mask.nii.gz"
+        _write_nifti(scan, np.ones((8, 9, 3), dtype=np.float32))
+        label = np.zeros((8, 9, 3), dtype=np.uint8)
+        label[index % 4 : index % 4 + 1, 2:4, 1] = 1
+        _write_nifti(mask, label)
+        split_cases.append(
+            {
+                "animal_id": case_id,
+                "study": "LYS",
+                "timepoint": "mixed",
+                "case_id": case_id,
+                "scan_nifti": str(scan),
+                "lesion_mask": str(mask),
+            }
+        )
+    plan = _write_empty_plan(tmp_path)
+    loaded = yaml.safe_load(plan.read_text())
+    loaded["splits"]["train"] = split_cases
+    plan.write_text(yaml.safe_dump(loaded))
+    dataset_root, _prepared = prepare_dataset(plan, repo_root=tmp_path)
+
+    result = split_prepared_dataset(
+        input_root=dataset_root,
+        output_root=tmp_path / "split_dataset",
+        validation_count=1,
+        test_count=1,
+        seed=1,
+    )
+
+    assert result.counts == {"train": 2, "validation": 1, "test": 1}
+    with result.manifest_path.open() as fh:
+        rows = list(csv.DictReader(fh))
+    by_split = {
+        split: {row["case_id"] for row in rows if row["split"] == split}
+        for split in ["train", "validation", "test"]
+    }
+    assert len(by_split["train"] & by_split["validation"]) == 0
+    assert len(by_split["train"] & by_split["test"]) == 0
+    assert len(by_split["validation"] & by_split["test"]) == 0
+    assert (result.output_root / "validation").is_dir()
+    assert (result.output_root / "test").is_dir()
 
 
 def test_review_lys_masks_prepares_editable_copy_without_touching_source(tmp_path):
@@ -518,11 +589,33 @@ def test_roiset_to_nifti_mask_requires_slice_metadata(tmp_path):
         )
 
 
+def test_segmentation_metrics_report_dice_and_accuracy_for_two_class_logits():
+    pred = np.zeros((1, 2, 2, 2, 1), dtype=np.float32)
+    pred[:, 0, :, :, :] = 1
+    target = np.zeros((1, 2, 2, 2, 1), dtype=np.float32)
+    target[:, 0, :, :, :] = 1
+    lesion_voxels = [(0, 0, 0), (1, 0, 0)]
+    for x, y, z in lesion_voxels:
+        pred[0, 0, x, y, z] = 0
+        pred[0, 1, x, y, z] = 5
+        target[0, 0, x, y, z] = 0
+        target[0, 1, x, y, z] = 1
+
+    metrics = _segmentation_metrics(pred, target)
+
+    assert metrics["dice"] == pytest.approx(1.0)
+    assert metrics["iou"] == pytest.approx(1.0)
+    assert metrics["accuracy"] == pytest.approx(1.0)
+    assert metrics["target_voxels"] == 2
+    assert metrics["pred_voxels"] == 2
+
+
 def test_cloud_command_plan_includes_pretrained_model():
     plan = build_cloud_command_plan(
         ratlesnet_repo="/content/RatLesNetv2",
         train_input="/content/dataset/train",
         validation_input="/content/dataset/validation",
+        test_input="/content/dataset/test",
         output_dir="/content/runs",
         pretrained_model="/content/pretrained/RatLesNetv2.model",
         epochs=3,
@@ -530,14 +623,24 @@ def test_cloud_command_plan_includes_pretrained_model():
         gpu=0,
         load_memory=0,
         save_every=1,
+        eval_every=1,
+        metrics_threshold=0.4,
         max_train_cases=1,
+        max_validation_cases=1,
+        max_test_cases=1,
     )
 
     command = format_command(plan.finetune_command)
 
     assert "git" in plan.clone_command[0]
     assert "--pretrained-model /content/pretrained/RatLesNetv2.model" in command
+    assert "--validation /content/dataset/validation" in command
+    assert "--test /content/dataset/test" in command
     assert "--epochs 3" in command
     assert "--lr 5e-05" in command
     assert "--save-every 1" in command
+    assert "--eval-every 1" in command
+    assert "--metrics-threshold 0.4" in command
     assert "--max-train-cases 1" in command
+    assert "--max-validation-cases 1" in command
+    assert "--max-test-cases 1" in command

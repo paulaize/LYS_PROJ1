@@ -143,6 +143,7 @@ def iter_case_specs(plan: dict[str, Any], *, repo_root: Path) -> list[CaseSpec]:
         raise ValueError("splits must be a mapping of split name -> case list")
 
     cases: list[CaseSpec] = []
+    seen_case_ids: dict[str, str] = {}
     for split, split_cases in splits.items():
         split_name = str(split)
         if split_name not in {"train", "validation", "test"}:
@@ -155,6 +156,14 @@ def iter_case_specs(plan: dict[str, Any], *, repo_root: Path) -> list[CaseSpec]:
             if not isinstance(raw_case, dict):
                 raise ValueError(f"splits.{split_name}[{index}] must be a mapping")
             animal_id = str(_required(raw_case, "animal_id"))
+            case_id = str(raw_case["case_id"]) if raw_case.get("case_id") is not None else animal_id
+            previous_split = seen_case_ids.get(case_id)
+            if previous_split is not None:
+                raise ValueError(
+                    f"Duplicate case_id {case_id!r} appears in both "
+                    f"{previous_split!r} and {split_name!r}; split leakage is not allowed"
+                )
+            seen_case_ids[case_id] = split_name
             cases.append(
                 CaseSpec(
                     split=split_name,
@@ -163,9 +172,7 @@ def iter_case_specs(plan: dict[str, Any], *, repo_root: Path) -> list[CaseSpec]:
                     lesion_mask=_resolve_path(repo_root, _required(raw_case, "lesion_mask")),
                     study=str(raw_case.get("study", "LYS")),
                     timepoint=str(raw_case.get("timepoint", "unknown_timepoint")),
-                    case_id=(
-                        str(raw_case["case_id"]) if raw_case.get("case_id") is not None else None
-                    ),
+                    case_id=case_id,
                 )
             )
 
