@@ -11,6 +11,7 @@ import yaml
 from ratlesnetv2_finetune.commands import build_cloud_command_plan, format_command
 from ratlesnetv2_finetune.dataset import prepare_dataset
 from ratlesnetv2_finetune.roiset_to_nifti_mask import convert_roiset_to_nifti_mask
+from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import _patch_nibabel_get_data_compat
 from ratlesnetv2_finetune.scripts.flip_external_si_axis import flip_pair_axis
 from ratlesnetv2_finetune.scripts.orient_external_dataset_lsp import (
     affine_for_axcodes,
@@ -157,6 +158,16 @@ def test_prepare_dataset_writes_4d_scan_label_and_manifest(tmp_path):
         rows = list(csv.DictReader(fh))
     assert rows[0]["animal_id"] == "A1"
     assert rows[0]["image_shape"] == "8x9x3x1"
+
+
+def test_nibabel_get_data_compat_patch_restores_upstream_loader_call():
+    img = nib.Nifti1Image(np.ones((2, 3, 4), dtype=np.float32), np.eye(4))
+
+    _patch_nibabel_get_data_compat()
+
+    loaded = img.get_data()
+    assert loaded.shape == (2, 3, 4)
+    assert np.allclose(loaded, 1)
 
 
 def test_prepare_dataset_rejects_spacing_mismatch(tmp_path):

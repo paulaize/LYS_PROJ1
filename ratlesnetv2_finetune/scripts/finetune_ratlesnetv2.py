@@ -62,6 +62,8 @@ def main() -> int:
         raise FileNotFoundError(f"RatLesNetV2 checkout not found: {ratlesnet_repo}")
     sys.path.insert(0, str(ratlesnet_repo))
 
+    _patch_nibabel_get_data_compat()
+
     import numpy as np
     import torch
     from lib.DataWrapper import DataWrapper
@@ -165,6 +167,22 @@ def _select_device(torch: Any, gpu: int) -> Any:
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return torch.device("mps")
     raise RuntimeError("No CUDA/MPS GPU available. Pass --gpu -1 to force CPU.")
+
+
+def _patch_nibabel_get_data_compat() -> None:
+    """Keep upstream RatLesNetV2 working with nibabel >= 5.
+
+    RatLesNetV2's DataWrapper still calls ``img.get_data()``, which nibabel
+    removed as an active API in version 5. Patching the method here avoids
+    downgrading Colab's scientific Python stack.
+    """
+    import nibabel as nib
+    import numpy as np
+
+    def get_data(self: Any, caching: str = "fill") -> Any:  # noqa: ARG001
+        return np.asanyarray(self.dataobj)
+
+    nib.dataobj_images.DataobjImage.get_data = get_data
 
 
 def _existing_dir(path: str | None, arg_name: str) -> Path:
