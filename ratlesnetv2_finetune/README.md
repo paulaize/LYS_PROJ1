@@ -549,8 +549,9 @@ Then this folder should exist:
 
 For a real training/evaluation run, do not train from the all-train smoke-test
 folder directly. Split the prepared folders first. Use external mouse data for
-mouse-domain adaptation and LYS data for target-domain fine-tuning plus final
-held-out evaluation:
+mouse-domain adaptation, but monitor that adaptation against target-domain LYS
+validation. Use LYS train for target-domain fine-tuning and held-out LYS test
+for final reporting:
 
 ```bash
 # LYS target-domain split: train + validation + held-out test.
@@ -561,12 +562,12 @@ python -m ratlesnetv2_finetune.scripts.split_prepared_dataset \
   --test-fraction 0.15 \
   --seed 20260706
 
-# External mouse adaptation split: train + validation, no final test claim.
+# External mouse adaptation split: train-only. LYS validation is used below.
 tar -xzf /content/drive/MyDrive/External_Mouse_T2w_manual_LSP_SI_v0.tar.gz -C /content
 python -m ratlesnetv2_finetune.scripts.split_prepared_dataset \
   --input /content/External_Mouse_T2w_manual_LSP_SI_v0 \
   --output /content/External_Mouse_T2w_manual_LSP_SI_v0_split \
-  --validation-fraction 0.10 \
+  --validation-fraction 0 \
   --test-fraction 0 \
   --seed 20260706
 ```
@@ -639,6 +640,7 @@ python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --validation /content/LYS_T2w_manual_v0/validation \
   --output /content/drive/MyDrive/ratlesnet_runs \
   --pretrained-model /content/pretrained/RatLesNetv2.model \
+  --require-pretrained \
   --epochs 100 \
   --lr 1e-4 \
   --gpu 0 \
@@ -647,18 +649,24 @@ python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
 ```
 
 Omit `--validation` if there is no validation split. Omit
-`--pretrained-model` for a smoke-test training run from initialization.
+`--pretrained-model` only for a smoke-test training run from initialization.
+For true RatLesNetV2 fine-tuning, upload or otherwise stage the upstream
+pretrained `RatLesNetv2.model` in Colab and pass it with
+`--pretrained-model`. Use `--require-pretrained` on real runs so the script
+fails loudly instead of silently training from scratch.
 
 First full staged Colab run after the smoke tests:
 
 ```bash
-# 1. External mouse adaptation. The validation metrics monitor adaptation only;
-#    they are not final evidence for LYS performance.
+# 1. External mouse adaptation. Validation is LYS target-domain validation.
+#    Do not pass the held-out LYS test split at this stage.
 python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --ratlesnet-repo /content/RatLesNetv2 \
   --input /content/External_Mouse_T2w_manual_LSP_SI_v0_split/train \
-  --validation /content/External_Mouse_T2w_manual_LSP_SI_v0_split/validation \
+  --validation /content/LYS_T2w_manual_v0_split/validation \
   --output /content/drive/MyDrive/ratlesnet_runs_external_adapt \
+  --pretrained-model /content/drive/MyDrive/RatLesNetv2.model \
+  --require-pretrained \
   --epochs 50 \
   --lr 1e-4 \
   --gpu 0 \
@@ -675,6 +683,7 @@ python -m ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 \
   --test /content/LYS_T2w_manual_v0_split/test \
   --output /content/drive/MyDrive/ratlesnet_runs_lys_finetune \
   --pretrained-model /content/drive/MyDrive/ratlesnet_runs_external_adapt/1/RatLesNetv2.model \
+  --require-pretrained \
   --epochs 100 \
   --lr 1e-4 \
   --gpu 0 \
@@ -691,13 +700,32 @@ validation_loss                  # when --validation is provided
 metrics_epoch.csv                # split-level loss, Dice, IoU, accuracy, etc.
 metrics_cases.csv                # per-case metrics per evaluated epoch/split
 final_metrics.json               # final validation/test summary
+loss_curves.png                  # train/eval loss over epochs
+validation_metric_curves.png     # Dice/IoU/precision/recall over epochs
+final_metric_summary.png         # final validation/test metric bars
 RatLesNetv2.model
 ```
 
 Report final model performance from the LYS `test` rows in
-`final_metrics.json` or `metrics_epoch.csv`. Training metrics and public mouse
-validation metrics are useful for debugging but are not target-domain
-performance claims.
+`final_metrics.json` or `metrics_epoch.csv`. The LYS validation rows are useful
+for monitoring/model selection during external adaptation and LYS fine-tuning,
+but they are not the final held-out performance claim.
+
+In Colab, view the latest plots with:
+
+```python
+from IPython.display import Image, display
+from pathlib import Path
+
+root = Path("/content/drive/MyDrive/ratlesnet_runs_lys_finetune")
+run = sorted([p for p in root.iterdir() if p.is_dir() and p.name.isdigit()],
+             key=lambda p: int(p.name))[-1]
+
+for name in ["loss_curves.png", "validation_metric_curves.png", "final_metric_summary.png"]:
+    path = run / name
+    if path.exists():
+        display(Image(filename=str(path)))
+```
 
 ## Data Rules
 

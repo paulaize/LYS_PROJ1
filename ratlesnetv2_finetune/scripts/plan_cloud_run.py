@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--cloud-output", default="/content/ratlesnet_runs")
     parser.add_argument("--pretrained-model", default=None)
+    parser.add_argument("--require-pretrained", action="store_true")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--gpu", type=int, default=0)
@@ -58,6 +59,7 @@ def main() -> int:
         test_input=test_input if has_test else None,
         output_dir=args.cloud_output,
         pretrained_model=args.pretrained_model,
+        require_pretrained=args.require_pretrained,
         epochs=args.epochs,
         lr=args.lr,
         gpu=args.gpu,

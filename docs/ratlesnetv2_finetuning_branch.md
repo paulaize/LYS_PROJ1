@@ -163,8 +163,9 @@ Immediate next actions in a new session:
    `External_Mouse_T2w_manual_LSP_SI_v0`.
 4. After both smoke tests pass, create proper split folders from the prepared
    tarballs with `ratlesnetv2_finetune.scripts.split_prepared_dataset`:
-   external `train + validation`, and LYS `train + validation + test`.
-5. Run external mouse adaptation first, then LYS fine-tuning with `--test`.
+   external `train`, and LYS `train + validation + test`.
+5. Run external mouse adaptation first with LYS validation monitoring, then LYS
+   fine-tuning with `--test`.
    `scripts/finetune_ratlesnetv2.py` writes `metrics_epoch.csv`,
    `metrics_cases.csv`, and `final_metrics.json`; final performance must be
    reported only from the held-out LYS `test` split.
@@ -186,6 +187,10 @@ Immediate next actions in a new session:
   precision, recall, and specificity for evaluation splits. Overall accuracy is
   background-dominated for sparse lesions, so Dice/recall/precision should be
   read first.
+- Passing `--ratlesnet-repo` only imports the upstream architecture/code. It
+  does not load the rat-trained weights. Real fine-tuning must pass
+  `--pretrained-model /path/to/RatLesNetv2.model`; add `--require-pretrained`
+  to fail loudly if the weights path is missing.
 
 ## Acceptance For This Branch Setup
 

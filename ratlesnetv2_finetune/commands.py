@@ -26,6 +26,7 @@ def build_cloud_command_plan(
     validation_input: str | Path | None = None,
     test_input: str | Path | None = None,
     pretrained_model: str | Path | None = None,
+    require_pretrained: bool = False,
     epochs: int = 100,
     lr: float = 1e-4,
     gpu: int = 0,
@@ -67,6 +68,8 @@ def build_cloud_command_plan(
         finetune_command.extend(["--test", str(test_input)])
     if pretrained_model:
         finetune_command.extend(["--pretrained-model", str(pretrained_model)])
+    if require_pretrained:
+        finetune_command.append("--require-pretrained")
     if save_every is not None:
         finetune_command.extend(["--save-every", str(save_every)])
     if eval_every is not None:

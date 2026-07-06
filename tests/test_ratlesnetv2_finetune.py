@@ -14,6 +14,7 @@ from ratlesnetv2_finetune.roiset_to_nifti_mask import convert_roiset_to_nifti_ma
 from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
     _patch_nibabel_get_data_compat,
     _segmentation_metrics,
+    _write_metric_plots,
 )
 from ratlesnetv2_finetune.scripts.flip_external_si_axis import flip_pair_axis
 from ratlesnetv2_finetune.scripts.orient_external_dataset_lsp import (
@@ -610,6 +611,33 @@ def test_segmentation_metrics_report_dice_and_accuracy_for_two_class_logits():
     assert metrics["pred_voxels"] == 2
 
 
+def test_metric_plots_are_written_when_matplotlib_is_available(tmp_path):
+    pytest.importorskip("matplotlib")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "training_loss").write_text("1.0\n0.8\n")
+    (run_dir / "metrics_epoch.csv").write_text(
+        "epoch,split,n_cases,loss,dice_mean,dice_median,iou_mean,iou_median,"
+        "accuracy_mean,accuracy_median,balanced_accuracy_mean,balanced_accuracy_median,"
+        "precision_mean,precision_median,recall_mean,recall_median,"
+        "specificity_mean,specificity_median,tp,fp,tn,fn,target_voxels,pred_voxels\n"
+        "1,validation,2,0.9,0.3,0.3,0.18,0.18,0.98,0.98,0.6,0.6,"
+        "0.4,0.4,0.3,0.3,0.99,0.99,3,4,100,7,10,7\n"
+        "2,validation,2,0.7,0.5,0.5,0.33,0.33,0.99,0.99,0.7,0.7,"
+        "0.6,0.6,0.5,0.5,0.99,0.99,5,3,100,5,10,8\n"
+        "2,validation_final,2,0.7,0.5,0.5,0.33,0.33,0.99,0.99,0.7,0.7,"
+        "0.6,0.6,0.5,0.5,0.99,0.99,5,3,100,5,10,8\n"
+        "2,test,2,0.75,0.45,0.45,0.29,0.29,0.98,0.98,0.68,0.68,"
+        "0.5,0.5,0.45,0.45,0.99,0.99,4,4,100,6,10,8\n"
+    )
+
+    _write_metric_plots(run_dir)
+
+    assert (run_dir / "loss_curves.png").exists()
+    assert (run_dir / "validation_metric_curves.png").exists()
+    assert (run_dir / "final_metric_summary.png").exists()
+
+
 def test_cloud_command_plan_includes_pretrained_model():
     plan = build_cloud_command_plan(
         ratlesnet_repo="/content/RatLesNetv2",
@@ -618,6 +646,7 @@ def test_cloud_command_plan_includes_pretrained_model():
         test_input="/content/dataset/test",
         output_dir="/content/runs",
         pretrained_model="/content/pretrained/RatLesNetv2.model",
+        require_pretrained=True,
         epochs=3,
         lr=5e-5,
         gpu=0,
@@ -634,6 +663,7 @@ def test_cloud_command_plan_includes_pretrained_model():
 
     assert "git" in plan.clone_command[0]
     assert "--pretrained-model /content/pretrained/RatLesNetv2.model" in command
+    assert "--require-pretrained" in command
     assert "--validation /content/dataset/validation" in command
     assert "--test /content/dataset/test" in command
     assert "--epochs 3" in command

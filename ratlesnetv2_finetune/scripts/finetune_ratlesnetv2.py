@@ -19,6 +19,8 @@ from typing import Any
 
 import numpy as np
 
+_PLOT_WARNING_SHOWN = False
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -31,6 +33,11 @@ def parse_args() -> argparse.Namespace:
         "--pretrained-model",
         default=None,
         help="Optional RatLesNetv2.model state dict",
+    )
+    parser.add_argument(
+        "--require-pretrained",
+        action="store_true",
+        help="Fail instead of training from scratch when --pretrained-model is missing.",
     )
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -61,6 +68,11 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.5,
         help="Threshold for one-channel binary model outputs. Two-channel outputs use argmax.",
+    )
+    parser.add_argument(
+        "--no-plots",
+        action="store_true",
+        help="Disable PNG metric plots. By default plots are updated when metrics are written.",
     )
     parser.add_argument("--max-train-cases", type=int, default=None, help="Small cloud smoke test")
     parser.add_argument(
@@ -133,6 +145,12 @@ def main() -> int:
 
     model = RatLesNetv2(modalities=args.modalities, filters=args.filters)
     model.to(device)
+    if args.require_pretrained and not args.pretrained_model:
+        raise ValueError(
+            "--require-pretrained was set, but --pretrained-model was not provided. "
+            "Pass the upstream RatLesNetV2 weights path to fine-tune instead of "
+            "training from scratch."
+        )
     if args.pretrained_model:
         _load_pretrained(
             torch,
@@ -141,7 +159,9 @@ def main() -> int:
             device=device,
             strict=not args.allow_partial_state_dict,
         )
+        print(now() + f"Loaded pretrained model: {args.pretrained_model}")
     else:
+        print(now() + "No --pretrained-model supplied; initializing model from scratch.")
         model.apply(_weight_init(torch, he_normal))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -195,6 +215,8 @@ def main() -> int:
         for summary in epoch_summaries:
             _append_epoch_metrics(run_dir / "metrics_epoch.csv", summary)
             _append_case_metrics(run_dir / "metrics_cases.csv", summary)
+        if epoch_summaries and not args.no_plots:
+            _write_metric_plots(run_dir)
 
         val_text = "" if val_loss is None else f" Val Loss: {val_loss:.8g}."
         metrics_text = _format_epoch_metrics(epoch_summaries)
@@ -236,6 +258,8 @@ def main() -> int:
         _append_case_metrics(run_dir / "metrics_cases.csv", summary)
     if final_summaries:
         _write_final_metrics(run_dir / "final_metrics.json", final_summaries)
+        if not args.no_plots:
+            _write_metric_plots(run_dir)
         print(now() + f"Wrote metrics: {run_dir / 'metrics_epoch.csv'}")
     else:
         print(
@@ -645,6 +669,153 @@ def _write_final_metrics(path: Path, summaries: list[EvaluationSummary]) -> None
     }
     with path.open("w") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)
+
+
+def _write_metric_plots(run_dir: Path) -> None:
+    global _PLOT_WARNING_SHOWN
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        if not _PLOT_WARNING_SHOWN:
+            print("matplotlib is not available; skipping metric PNG plots.")
+            _PLOT_WARNING_SHOWN = True
+        return
+
+    epoch_rows = _read_metric_rows(run_dir / "metrics_epoch.csv")
+    training_loss = _read_loss_series(run_dir / "training_loss")
+    if training_loss or epoch_rows:
+        _plot_loss_curves(run_dir / "loss_curves.png", training_loss, epoch_rows, plt)
+    if epoch_rows:
+        _plot_metric_curves(run_dir / "validation_metric_curves.png", epoch_rows, plt)
+        _plot_final_metric_bars(run_dir / "final_metric_summary.png", epoch_rows, plt)
+
+
+def _read_loss_series(path: Path) -> list[float]:
+    if not path.exists():
+        return []
+    values: list[float] = []
+    with path.open() as fh:
+        for raw in fh:
+            text = raw.strip()
+            if text:
+                values.append(float(text))
+    return values
+
+
+def _read_metric_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    with path.open(newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    for row in rows:
+        row["epoch"] = int(row["epoch"])
+        for key, value in list(row.items()):
+            if key in {"epoch", "split"} or value == "":
+                continue
+            row[key] = float(value)
+    return rows
+
+
+def _plot_loss_curves(
+    path: Path,
+    training_loss: list[float],
+    rows: list[dict[str, Any]],
+    plt: Any,
+) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    if training_loss:
+        ax.plot(range(1, len(training_loss) + 1), training_loss, label="train loss")
+    for split in ["validation", "train"]:
+        split_rows = _rows_for_split(rows, split)
+        if split_rows:
+            ax.plot(
+                [row["epoch"] for row in split_rows],
+                [row["loss"] for row in split_rows],
+                marker="o",
+                markersize=3,
+                label=f"{split} eval loss",
+            )
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training and Evaluation Loss")
+    ax.grid(alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_metric_curves(path: Path, rows: list[dict[str, Any]], plt: Any) -> None:
+    metrics = [
+        ("dice_mean", "Dice"),
+        ("iou_mean", "IoU"),
+        ("precision_mean", "Precision"),
+        ("recall_mean", "Recall"),
+    ]
+    fig, axes = plt.subplots(2, 2, figsize=(9, 6), sharex=True)
+    for ax, (metric, label) in zip(axes.ravel(), metrics, strict=True):
+        for split in ["validation", "train"]:
+            split_rows = _rows_for_split(rows, split)
+            split_rows = [row for row in split_rows if row.get(metric) is not None]
+            if split_rows:
+                ax.plot(
+                    [row["epoch"] for row in split_rows],
+                    [row[metric] for row in split_rows],
+                    marker="o",
+                    markersize=3,
+                    label=split,
+                )
+        ax.set_title(label)
+        ax.set_ylim(0.0, 1.0)
+        ax.grid(alpha=0.25)
+    axes[-1, 0].set_xlabel("Epoch")
+    axes[-1, 1].set_xlabel("Epoch")
+    axes[0, 0].legend()
+    fig.suptitle("Segmentation Metrics During Training", y=1.02)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_final_metric_bars(path: Path, rows: list[dict[str, Any]], plt: Any) -> None:
+    final_rows = [
+        row
+        for row in rows
+        if row["split"] in {"validation_final", "test"}
+    ]
+    if not final_rows:
+        return
+    metrics = [
+        ("dice_mean", "Dice"),
+        ("iou_mean", "IoU"),
+        ("precision_mean", "Precision"),
+        ("recall_mean", "Recall"),
+    ]
+    labels = [row["split"] for row in final_rows]
+    x = np.arange(len(labels))
+    width = 0.18
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    for index, (metric, label) in enumerate(metrics):
+        offsets = x + (index - 1.5) * width
+        ax.bar(offsets, [row.get(metric, 0.0) for row in final_rows], width, label=label)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylim(0.0, 1.0)
+    ax.set_ylabel("Score")
+    ax.set_title("Final Evaluation Summary")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
+
+def _rows_for_split(rows: list[dict[str, Any]], split: str) -> list[dict[str, Any]]:
+    return [row for row in rows if row["split"] == split]
 
 
 def _write_run_config(
