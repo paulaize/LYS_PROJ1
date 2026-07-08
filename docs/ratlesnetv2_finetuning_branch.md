@@ -2,210 +2,48 @@
 
 Branch: `dl-ratlesnetv2-finetune`
 
-This branch starts the independent MRI lesion deep-learning track requested by
-Paul. It is deliberately separate from the active v1 spine: v1 still produces
-human-reviewed lesion masks, while this branch turns those masks into training
-data for a future neural-network draft segmenter.
+This branch is an independent MRI lesion deep-learning track. It is not the
+active v1 segmentation backend. v1 still uses human-reviewed masks as the
+scientific source of truth; RatLesNetV2 outputs are draft masks that must return
+through the same review gate.
 
-## Why RatLesNetV2 Here
+Command details live in [../ratlesnetv2_finetune/README.md](../ratlesnetv2_finetune/README.md).
 
-RatLesNetV2 is a rodent T2w lesion segmentation network with public code at
-<https://github.com/jmlipman/RatLesNetv2> and paper record
-<https://arxiv.org/abs/2001.09138>. It is not the active v1 segmentation
-backend. It is a candidate transfer-learning branch for later MRI lesion
-drafts once enough corrected LYS masks exist.
+## Current Position
 
 RatLesNetV2 was trained on rat T2w stroke MRI. The LYS target is mouse T2w MRI,
-so the branch should treat the upstream weights as a rodent lesion prior, then
-adapt through public mouse datasets before final LYS fine-tuning:
+so upstream weights are a rodent lesion prior, not a finished LYS segmenter.
 
-```text
-RatLesNetV2 rat weights
-  -> public mouse native-space manual masks
-  -> LYS native-space human-reviewed masks
-  -> held-out LYS validation
-```
+The current direct LYS fine-tuning run is promising and is now the baseline to
+beat:
 
-The external mouse dataset inventory, overlap notes, geometry summary, and
-recommended inclusion rules are tracked in
-`docs/ratlesnetv2_external_datasets.md`.
+- validation Dice reached about `0.53` by epoch 10
+- recall improved from about `0.51` to `0.61`
+- predicted lesion voxels approached target lesion voxels
+- this does not look like background collapse
 
-## Local vs Cloud Responsibilities
+The curve is beginning to plateau and validation loss rises after about epoch
+4. Continue from `best_by_validation_dice.model` with lower LR or
+`reduce-on-plateau`, early stopping, and validation overlays. Do not select the
+final epoch automatically.
 
-Local MacBook Pro M1 8 GB:
+## Experiment Order
 
-- prepare NIfTI folders,
-- validate shapes/spacing/labels,
-- write manifests,
-- run unit tests,
-- plan cloud commands.
+Use this order:
 
-Cloud GPU runtime:
-
-- clone upstream RatLesNetV2,
-- run the finetuning/training script,
-- save checkpoints outside git,
-- export predictions for later human review.
-
-No local CUDA setup is expected. If PyTorch is used locally, the code selects
-MPS when available rather than CUDA, but real training should happen on cloud.
-
-## Added Folder
-
-`ratlesnetv2_finetune/` contains:
-
-- `dataset.py`: deterministic conversion from configured NIfTI scan/manual mask
-  pairs to RatLesNetV2 folders.
-- `roiset_to_nifti_mask.py`: Fiji/ImageJ `RoiSet.zip` to
-  `*_lesion_mask.nii.gz` converter for polygon/freehand lesion outlines.
-- `source_folders.py`: source-folder scanner that appends matched
-  `case.nii.gz` / `case_lesion_mask.nii.gz` pairs to a dataset YAML plan.
-- `scripts/review_lys_masks_itksnap.py`: opens reviewed copies of LYS T2w
-  images and masks in ITK-SNAP so masks can be lightly corrected without
-  overwriting the original cleaned source folder.
-- `scripts/add_source_folder.py`: CLI for running that scanner once per local
-  source folder.
-- `scripts/prepare_dataset.py`: local dataset-preparation CLI.
-- `scripts/plan_cloud_run.py`: prints Colab/cloud commands.
-- `scripts/finetune_ratlesnetv2.py`: cloud training loop that imports the
-  upstream model, optionally loads pretrained weights, and continues training.
-- `configs/dataset_template.yml`: first dataset plan, seeded with `BD_08_5D`.
-- `configs/dataset_from_folders_template.yml`: empty plan intended to be copied
-  to a gitignored local YAML before importing local source folders.
-- `requirements-colab.txt`: cloud runtime dependency list.
-
-Relevant documents:
-
-- `ratlesnetv2_finetune/README.md`: command-oriented local/Colab workflow.
-- `docs/ratlesnetv2_external_datasets.md`: public mouse dataset sources,
-  overlaps, geometry, and training-set construction rules.
-- `docs/MRI_IHC_pipeline_plan_DL.md`: broader DL-first pipeline context.
-
-## Intended Local-To-Colab Flow
-
-Current handoff state, 2026-07-06:
-
-- The LYS reviewed dataset and the external public mouse dataset have already
-  been exported into RatLesNetV2 folder format and packaged as Google Drive
-  upload tarballs:
-  - `LYS_T2w_manual_v0.tar.gz`
-  - `External_Mouse_T2w_manual_LSP_SI_v0.tar.gz`
-- LYS export: 262 train cases, all under `train/LYS/mixed`; shape counts are
-  254 `256 x 256 x 18 x 1` and 8 `256 x 256 x 20 x 1`.
-- External export: 426 train cases, all under `train/ExternalMouse/mixed`;
-  shape counts are 391 `256 x 256 x 32 x 1` and 35
-  `192 x 192 x 32 x 1`.
-- These are all-train smoke-test exports. Use them to verify Colab runtime,
-  upstream RatLesNetV2 imports, and the NIfTI folder contract. Do not use them
-  for final model-performance claims.
-- Colab authentication for the private GitHub repository should use a GitHub
-  personal access token configured through `/root/.netrc`; do not rely on the
-  interactive username/password prompt.
-- The first Colab attempt reached the RatLesNetV2 training loop, then failed
-  because upstream `DataWrapper.py` calls nibabel's removed `img.get_data()`
-  method under modern Colab nibabel. The local wrapper now patches nibabel
-  compatibility inside `scripts/finetune_ratlesnetv2.py`; do not downgrade
-  Colab packages to solve this.
-- Current local verification after that fix:
-  - `make lint` passed.
-  - `make test` passed with 57 tests.
-  - A synthetic one-case end-to-end training smoke test against a fresh
-    upstream `jmlipman/RatLesNetv2` clone completed and saved
-    `RatLesNetv2.model`.
-- First real Stage 1 external-adaptation signal is weak/negative on LYS
-  validation. With external mouse train, LYS validation, upstream rat
-  `homogeneous/model-1`, `CrossEntropyDiceLoss`, Adam, `lr=1e-4`, and
-  `--eval-every 1`, validation Dice peaked early at epoch 2 (`0.03021`) and
-  then fell by epoch 8 (`0.00750`) while training loss decreased and accuracy
-  stayed around `0.995`. Treat this as likely negative transfer or overly
-  conservative/background-dominated prediction until overlays and voxel counts
-  prove otherwise.
-
-1. Download external public archives outside git if public mouse adaptation is
-   being used.
-2. Convert/import only native-space manual public masks into source-folder
-   format, following `docs/ratlesnetv2_external_datasets.md`.
-3. If LYS manual lesion outlines are Fiji ROI Manager exports, run the bulk
-   LYS RoiSet/Bruker cleanup first to create the local source folder:
-   `~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source/`.
-4. Review/edit LYS masks with `make ratlesnetv2-review-lys-masks`. This writes
-   editable copies under
-   `~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed/`.
-   Use this reviewed folder for training import, not the original unreviewed
-   source folder.
-5. For the first Colab smoke test, copy
-   `configs/dataset_from_folders_template.yml` to
-   `ratlesnetv2_finetune/configs/local_lys_reviewed.yml`.
-6. Add the reviewed LYS folder to that plan as `train`, then run
-   `make ratlesnetv2-prepare ... RUN_ARGS="--overwrite"`. This writes the
-   harmonized RatLesNetV2 dataset under `work/ratlesnetv2_finetune/datasets/`.
-7. Tar `LYS_T2w_manual_v0` and upload the tarball to Google Drive. Raw Desktop
-   source folders are not required on the cloud after the local harmonized
-   export exists.
-8. In Colab, mount Google Drive, clone this branch, install
-   `ratlesnetv2_finetune/requirements-colab.txt`, clone upstream RatLesNetV2,
-   extract the tarball to `/content`, and run one case for one epoch with
-   `--max-train-cases 1 --save-every 1`.
-9. Treat that first run as a runtime/data-contract smoke test only. Before a
-   real finetune/evaluation, create explicit train/validation/test splits and
-   reserve held-out LYS animals for validation/test.
-
-Immediate next actions in a new session:
-
-1. Commit and push the current nibabel compatibility fix if it has not already
-   been pushed:
-
-   ```bash
-   git add ratlesnetv2_finetune/scripts/finetune_ratlesnetv2.py \
-     tests/test_ratlesnetv2_finetune.py \
-     ratlesnetv2_finetune/README.md \
-     docs/ratlesnetv2_finetuning_branch.md
-   git commit -m "Document and patch RatLesNetV2 Colab smoke test"
-   git push origin dl-ratlesnetv2-finetune
-   ```
-
-2. In Colab, restart the runtime, reclone the branch, clone upstream
-   RatLesNetV2, extract the uploaded tarballs, and rerun the one-case,
-   one-epoch LYS smoke test.
-3. If the LYS smoke test succeeds, run the same one-case smoke test on
-   `External_Mouse_T2w_manual_LSP_SI_v0`.
-4. After both smoke tests pass, create proper split folders from the prepared
-   tarballs with `ratlesnetv2_finetune.scripts.split_prepared_dataset`:
-   external `train`, and LYS `train + validation + test`.
-5. Do not treat external mouse adaptation as a default 50-epoch stage. First
-   run the original rat model on LYS validation with no training, then run
-   direct rat-to-LYS fine-tuning. Only keep external adaptation if a short,
-   low-LR external bridge improves downstream LYS validation performance.
-6. `scripts/finetune_ratlesnetv2.py` writes `metrics_epoch.csv`,
-   `metrics_cases.csv`, plots, and `final_metrics.json`; final performance
-   must be reported only from the held-out LYS `test` split after model
-   selection is complete.
-
-## Revised Experiment Plan After Stage 1 Metrics
-
-The project objective is not to maximize Stage 1 validation alone. It is to
-maximize final LYS lesion-segmentation performance while preserving a held-out
-LYS test set. Based on the first Stage 1 curve, use this order:
-
-1. **Run 0: rat baseline, no training.** Evaluate the upstream RatLesNetV2
-   checkpoint directly on LYS validation. This establishes whether external
-   adaptation improves or worsens the starting point.
-2. **Run 1: direct LYS fine-tuning baseline.** Start from upstream rat weights
-   and train on LYS train with LYS validation. Use a lower fine-tuning LR
-   first (`5e-5`, then `1e-5` if needed). This is the main baseline.
-3. **Run 2: short external adaptation.** Start from rat weights, train external
-   mouse for about 5 epochs at `5e-5`, validate on LYS validation, and keep
-   only `best_by_validation_dice.model`.
-4. **Run 3: very gentle external adaptation.** Repeat with about 10 epochs at
-   `1e-5`.
-5. **Run 4: LYS fine-tuning after the best short external bridge.** Compare
-   this against direct rat-to-LYS fine-tuning using LYS validation. Use LYS
-   test only once the strategy is chosen.
+1. **Rat baseline.** Evaluate upstream rat weights on LYS validation without
+   training.
+2. **Direct LYS fine-tuning.** Train rat weights on LYS train and select by LYS
+   validation Dice. This is the main baseline.
+3. **Short external mouse adaptation.** Train rat weights briefly on external
+   mouse train while monitoring LYS validation.
+4. **LYS fine-tuning after external adaptation.** Continue from the best
+   external checkpoint and compare against direct LYS fine-tuning.
 
 Keep external mouse adaptation only if:
 
 ```text
-rat -> short external bridge -> LYS fine-tuning
+rat -> external mouse adaptation -> LYS fine-tuning
 ```
 
 beats:
@@ -214,52 +52,107 @@ beats:
 rat -> LYS fine-tuning
 ```
 
-on LYS validation, and then confirms on held-out LYS test.
+on LYS validation and later confirms on the held-out LYS test.
 
-Immediate tooling priorities:
+Do not use the held-out LYS test split until the final training strategy is
+chosen from validation Dice and overlay QC.
 
-- Save `best_by_validation_dice.model`, `best_by_validation_loss.model`, and
-  `last.model`.
-- Handle Ctrl-C gracefully in Colab by writing `interrupted.model`,
-  `last.model`, and `run_status.json` before exiting.
-- Add early stopping based on validation Dice.
-- Export selected validation/test prediction masks and overlay PNGs for visual
-  QC, including a root-level `latest_qc_overlay.png` for quick Colab display.
-- Plot `pred_voxels` vs `target_voxels`, recall, and precision so background
-  collapse is visible quickly.
-- Later, add optional second validation input for simultaneous external-val and
-  LYS-val monitoring, plus multi-threshold/probability-map diagnostics.
+## Local vs Cloud Responsibilities
 
-## Current Limitations
+Local MacBook:
 
-- One case is enough to smoke-test the path, not to estimate model performance.
-- Finetuned predictions must still pass through the human mask review gate.
-- Dataset export is single-modality T2w only.
-- The upstream code expects `scan_lesionIAM.nii.gz`; the exporter also writes
-  `scan_lesion.nii.gz` for README compatibility.
-- The current tarball exports are all-train smoke-test datasets; split exports
-  or split folders are required for real training/evaluation.
-- Public dataset import, orientation correction, and deduplication have been
-  run for the current external source folder. The documented policy remains
-  manual/native labels only, no duplicates, and final validation on held-out
-  LYS cases.
-- The finetuning script reports Dice, IoU, accuracy, balanced accuracy,
-  precision, recall, and specificity for evaluation splits. Overall accuracy is
-  background-dominated for sparse lesions, so Dice/recall/precision should be
-  read first.
-- Passing `--ratlesnet-repo` only imports the upstream architecture/code. It
-  does not load the rat-trained weights. Real fine-tuning must pass
-  `--pretrained-model /path/to/RatLesNetv2.model`; add `--require-pretrained`
-  to fail loudly if the weights path is missing.
-- The first Stage 1 long-run trend suggests `lr=1e-4` for 50 external epochs
-  is too aggressive or not transferring. Avoid relying on final epoch-50
-  external checkpoints until best-by-Dice checkpointing and overlays have been
-  reviewed.
+- convert and review LYS masks
+- prepare RatLesNetV2 folder contracts
+- validate manifests/shapes/spacing
+- run tests
 
-## Acceptance For This Branch Setup
+Cloud GPU runtime:
 
-- `main` includes the committed `ihc` history.
-- `ihc` remains as a branch for future work.
-- `dl-ratlesnetv2-finetune` branches from updated `main`.
-- Local tests cover dataset preparation and cloud-command planning without
-  requiring PyTorch, model downloads, or network calls.
+- clone upstream RatLesNetV2
+- train/fine-tune
+- write checkpoints, plots, overlays, and prediction masks
+
+Kaggle is currently the preferred free GPU runtime. Colab remains a fallback.
+
+## Folder Contents
+
+`ratlesnetv2_finetune/` contains:
+
+- `dataset.py`: deterministic conversion from configured scan/mask pairs to the
+  RatLesNetV2 folder contract.
+- `roiset_to_nifti_mask.py`: Fiji/ImageJ RoiSet -> NIfTI lesion mask.
+- `source_folders.py`: scans local source folders for scan/mask pairs.
+- `scripts/prepare_lys_roiset_dataset.py`: bulk LYS RoiSet/Bruker cleanup.
+- `scripts/review_lys_masks_itksnap.py`: opens editable mask copies in
+  ITK-SNAP.
+- `scripts/add_source_folder.py`: updates a local dataset YAML plan.
+- `scripts/prepare_dataset.py`: builds prepared RatLesNetV2 folders.
+- `scripts/split_prepared_dataset.py`: creates train/validation/test splits
+  from a prepared dataset.
+- `scripts/plan_cloud_run.py`: prints notebook/cloud commands.
+- `scripts/finetune_ratlesnetv2.py`: imports upstream RatLesNetV2 and runs
+  evaluation/fine-tuning with metrics, checkpoints, LR scheduling, and
+  prediction exports.
+- `requirements-colab.txt`: notebook GPU runtime requirements. The filename is
+  historical; it is used for Kaggle and Colab.
+
+## Current Data State
+
+Prepared upload archives:
+
+- `LYS_T2w_manual_v0.tar.gz`
+- `External_Mouse_T2w_manual_LSP_SI_v0.tar.gz`
+
+Kaggle dataset path:
+
+```text
+/kaggle/input/datasets/paaulaiz/ratlesnet-training-tarballs/
+```
+
+Current counts:
+
+- LYS: 262 cases, mostly `256 x 256 x 18 x 1`
+- external mouse: 426 cases, mostly `256 x 256 x 32 x 1`
+
+Kaggle input datasets are read-only. Write split folders, checkpoints, plots,
+and overlays under `/kaggle/working`.
+
+If a Kaggle copy exposes only `scan.nii` / `scan_lesionIAM.nii`, create
+compressed `.nii.gz` aliases in `/kaggle/working` before training.
+
+## Metrics To Trust
+
+Read these first:
+
+- Dice
+- recall
+- precision
+- predicted lesion voxels vs target lesion voxels
+- validation overlays
+
+Overall accuracy is background-dominated for sparse lesion masks and should not
+drive decisions.
+
+## Required Run Artifacts
+
+Real comparison runs should write:
+
+- `best_by_validation_dice.model`
+- `best_by_validation_loss.model`
+- `last.model`
+- `lr_history.csv`
+- `metrics_epoch.csv`
+- `metrics_cases.csv`
+- `final_metrics.json`
+- validation overlays and voxel-count curves
+
+Interrupted runs should write `interrupted.model` and `run_status.json`.
+
+## Limits
+
+- One-case/one-epoch runs are smoke tests only.
+- All-train prepared exports must be split before real evaluation.
+- Public mouse validation is not evidence of LYS performance.
+- Passing `--ratlesnet-repo` only imports upstream code; real fine-tuning also
+  needs `--pretrained-model ... --require-pretrained`.
+- Predictions are not scientific outputs until reviewed/corrected.

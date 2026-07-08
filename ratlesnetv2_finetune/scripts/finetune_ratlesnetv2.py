@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import itertools
 import json
 import random
 import shutil
@@ -91,6 +92,42 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Minimum validation Dice improvement required to reset early stopping.",
+    )
+    parser.add_argument(
+        "--lr-scheduler",
+        choices=["none", "reduce-on-plateau"],
+        default="none",
+        help="Optional learning-rate scheduler. reduce-on-plateau requires validation.",
+    )
+    parser.add_argument(
+        "--lr-scheduler-metric",
+        choices=["validation_dice", "validation_loss"],
+        default="validation_dice",
+        help="Validation metric monitored by --lr-scheduler reduce-on-plateau.",
+    )
+    parser.add_argument(
+        "--lr-plateau-patience",
+        type=int,
+        default=3,
+        help="Validation evaluations without improvement before reducing LR.",
+    )
+    parser.add_argument(
+        "--lr-plateau-factor",
+        type=float,
+        default=0.5,
+        help="Multiplicative LR reduction factor for reduce-on-plateau.",
+    )
+    parser.add_argument(
+        "--lr-plateau-min-delta",
+        type=float,
+        default=0.0,
+        help="Minimum scheduler-monitored improvement before a plateau is counted.",
+    )
+    parser.add_argument(
+        "--min-lr",
+        type=float,
+        default=1e-6,
+        help="Lower LR bound for reduce-on-plateau.",
     )
     parser.add_argument(
         "--export-predictions",
@@ -182,6 +219,17 @@ def main() -> int:
         raise ValueError("--export-prediction-limit must be >= 1 when exporting predictions")
     if args.early_stop_patience is not None and args.early_stop_patience < 1:
         raise ValueError("--early-stop-patience must be >= 1")
+    if args.lr_scheduler != "none":
+        if val_data is None:
+            raise ValueError("--lr-scheduler requires --validation")
+        if args.eval_every < 1:
+            raise ValueError("--lr-scheduler requires --eval-every >= 1")
+    if args.lr_plateau_patience < 1:
+        raise ValueError("--lr-plateau-patience must be >= 1")
+    if not 0.0 < args.lr_plateau_factor < 1.0:
+        raise ValueError("--lr-plateau-factor must be > 0 and < 1")
+    if args.min_lr < 0.0:
+        raise ValueError("--min-lr must be >= 0")
 
     model = RatLesNetv2(modalities=args.modalities, filters=args.filters)
     model.to(device)
@@ -205,6 +253,7 @@ def main() -> int:
         model.apply(_weight_init(torch, he_normal))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    lr_scheduler = _build_lr_scheduler(torch=torch, optimizer=optimizer, args=args)
     _write_run_config(
         run_dir,
         args,
@@ -227,6 +276,7 @@ def main() -> int:
         if not summaries:
             raise ValueError("--eval-only requires --validation and/or --test")
         for summary in summaries:
+            summary["lr"] = _current_lr(optimizer)
             _append_epoch_metrics(run_dir / "metrics_epoch.csv", summary)
             _append_case_metrics(run_dir / "metrics_cases.csv", summary)
         _export_requested_predictions(
@@ -266,6 +316,7 @@ def main() -> int:
         for epoch in range(args.epochs):
             epoch_num = epoch + 1
             current_epoch = epoch_num
+            epoch_lr = _current_lr(optimizer)
             train_loss = _run_epoch(
                 model=model,
                 data=train_data,
@@ -275,6 +326,8 @@ def main() -> int:
             _append_loss(run_dir / "training_loss", train_loss)
 
             val_loss: float | None = None
+            scheduler_metric_name = ""
+            scheduler_metric_value: float | None = None
             epoch_summaries: list[EvaluationSummary] = []
             should_eval = args.eval_every > 0 and epoch_num % args.eval_every == 0
             if should_eval and args.eval_train:
@@ -301,6 +354,12 @@ def main() -> int:
                 val_loss = val_eval["loss"]
                 _append_loss(run_dir / "validation_loss", val_loss)
                 epoch_summaries.append(val_eval)
+                if lr_scheduler is not None:
+                    scheduler_metric_name, scheduler_metric_value = _scheduler_metric_value(
+                        val_eval,
+                        metric=args.lr_scheduler_metric,
+                    )
+                    lr_scheduler.step(scheduler_metric_value)
                 improved = _update_best_checkpoints(
                     torch=torch,
                     model=model,
@@ -310,9 +369,20 @@ def main() -> int:
                     min_dice_delta=args.early_stop_min_delta,
                 )
                 no_dice_improvement = 0 if improved else no_dice_improvement + 1
+            next_lr = _current_lr(optimizer)
             for summary in epoch_summaries:
+                summary["lr"] = epoch_lr
                 _append_epoch_metrics(run_dir / "metrics_epoch.csv", summary)
                 _append_case_metrics(run_dir / "metrics_cases.csv", summary)
+            _append_lr_history(
+                run_dir / "lr_history.csv",
+                epoch=epoch_num,
+                train_loss=train_loss,
+                lr=epoch_lr,
+                next_lr=next_lr,
+                scheduler_metric=scheduler_metric_name,
+                scheduler_value=scheduler_metric_value,
+            )
             if epoch_summaries:
                 _export_requested_predictions(
                     model=model,
@@ -332,10 +402,14 @@ def main() -> int:
                 _write_metric_plots(run_dir)
 
             val_text = "" if val_loss is None else f" Val Loss: {val_loss:.8g}."
+            lr_text = f" LR: {epoch_lr:.4g}."
+            if next_lr != epoch_lr:
+                lr_text += f" Next LR: {next_lr:.4g}."
             metrics_text = _format_epoch_metrics(epoch_summaries)
             print(
                 now()
-                + f"Epoch: {epoch_num}. Loss: {train_loss:.8g}.{val_text}{metrics_text}"
+                + f"Epoch: {epoch_num}. Loss: {train_loss:.8g}.{val_text}{lr_text}"
+                + metrics_text
             )
 
             if args.save_every > 0 and epoch_num % args.save_every == 0:
@@ -403,6 +477,7 @@ def main() -> int:
             )
         )
     for summary in final_summaries:
+        summary["lr"] = _current_lr(optimizer)
         _append_epoch_metrics(run_dir / "metrics_epoch.csv", summary)
         _append_case_metrics(run_dir / "metrics_cases.csv", summary)
     _export_requested_predictions(
@@ -466,7 +541,7 @@ def _patch_nibabel_get_data_compat() -> None:
 
     RatLesNetV2's DataWrapper still calls ``img.get_data()``, which nibabel
     removed as an active API in version 5. Patching the method here avoids
-    downgrading Colab's scientific Python stack.
+    downgrading the notebook runtime's scientific Python stack.
     """
     import nibabel as nib
     import numpy as np
@@ -517,6 +592,40 @@ def _weight_init(torch: Any, he_normal: Any) -> Any:
             torch.nn.init.zeros_(module.bias)
 
     return apply
+
+
+def _build_lr_scheduler(*, torch: Any, optimizer: Any, args: argparse.Namespace) -> Any | None:
+    if args.lr_scheduler == "none":
+        return None
+    mode = "max" if args.lr_scheduler_metric == "validation_dice" else "min"
+    return torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode=mode,
+        factor=args.lr_plateau_factor,
+        patience=args.lr_plateau_patience,
+        threshold=args.lr_plateau_min_delta,
+        threshold_mode="abs",
+        min_lr=args.min_lr,
+    )
+
+
+def _scheduler_metric_value(
+    summary: EvaluationSummary,
+    *,
+    metric: str,
+) -> tuple[str, float]:
+    if metric == "validation_dice":
+        value = summary.get("dice_mean")
+        if value is None:
+            raise ValueError("validation Dice is unavailable for LR scheduler")
+        return "validation_dice", float(value)
+    if metric == "validation_loss":
+        return "validation_loss", float(summary["loss"])
+    raise ValueError(f"Unknown LR scheduler metric: {metric!r}")
+
+
+def _current_lr(optimizer: Any) -> float:
+    return float(optimizer.param_groups[0]["lr"])
 
 
 def _load_pretrained(
@@ -894,6 +1003,7 @@ def _append_epoch_metrics(path: Path, summary: EvaluationSummary) -> None:
         "epoch",
         "split",
         "n_cases",
+        "lr",
         "loss",
         "dice_mean",
         "dice_median",
@@ -942,6 +1052,38 @@ def _append_case_metrics(path: Path, summary: EvaluationSummary) -> None:
     for case in summary["cases"]:
         row = {"epoch": summary["epoch"], "split": summary["split"], **case}
         _append_dict_row(path, columns, row)
+
+
+def _append_lr_history(
+    path: Path,
+    *,
+    epoch: int,
+    train_loss: float,
+    lr: float,
+    next_lr: float,
+    scheduler_metric: str,
+    scheduler_value: float | None,
+) -> None:
+    columns = [
+        "epoch",
+        "train_loss",
+        "lr",
+        "next_lr",
+        "scheduler_metric",
+        "scheduler_value",
+    ]
+    _append_dict_row(
+        path,
+        columns,
+        {
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "lr": lr,
+            "next_lr": next_lr,
+            "scheduler_metric": scheduler_metric,
+            "scheduler_value": scheduler_value,
+        },
+    )
 
 
 def _append_dict_row(path: Path, columns: list[str], row: dict[str, Any]) -> None:
@@ -1164,14 +1306,26 @@ def _save_prediction_artifacts(
     probability = _lesion_probability_map(pred).astype(np.float32)
 
     source_dir = _source_case_dir(data, index)
-    ref_img = _load_reference_image(source_dir, expected_shape=pred_mask.shape)
+    ref_img = _load_reference_image(source_dir)
+    if ref_img is not None:
+        reference_shape = tuple(int(v) for v in ref_img.shape[:3])
+        try:
+            pred_mask = _transpose_to_shape(pred_mask, reference_shape)
+            target_mask = _transpose_to_shape(target_mask, reference_shape)
+            probability = _transpose_to_shape(probability, reference_shape)
+        except ValueError:
+            ref_img = None
+
     scan = (
         _scan_volume_from_reference(ref_img)
         if ref_img is not None
         else _scan_volume_from_tensor(x)
     )
     if tuple(scan.shape) != tuple(pred_mask.shape):
-        scan = _scan_volume_from_tensor(x)
+        try:
+            scan = _transpose_to_shape(_scan_volume_from_tensor(x), tuple(pred_mask.shape))
+        except ValueError:
+            scan = _scan_volume_from_tensor(x)
     if tuple(scan.shape) != tuple(pred_mask.shape):
         scan = np.zeros(pred_mask.shape, dtype=np.float32)
     if ref_img is None or tuple(ref_img.shape[:3]) != tuple(pred_mask.shape):
@@ -1207,8 +1361,6 @@ def _source_case_dir(data: Any, index: int) -> Path | None:
 
 def _load_reference_image(
     source_dir: Path | None,
-    *,
-    expected_shape: tuple[int, ...],
 ) -> Any | None:
     if source_dir is None:
         return None
@@ -1217,9 +1369,7 @@ def _load_reference_image(
     for name in ["scan.nii.gz", "scan.nii"]:
         path = source_dir / name
         if path.exists():
-            img = nib.load(str(path))
-            if tuple(img.shape[:3]) == tuple(expected_shape):
-                return img
+            return nib.load(str(path))
     return None
 
 
@@ -1245,6 +1395,19 @@ def _scan_volume_from_array(value: np.ndarray) -> np.ndarray:
     return np.squeeze(arr).astype(np.float32, copy=False)
 
 
+def _transpose_to_shape(array: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
+    arr = np.asarray(array)
+    target = tuple(int(v) for v in target_shape)
+    if tuple(arr.shape) == target:
+        return arr
+    if arr.ndim != len(target):
+        raise ValueError(f"Cannot align array shape {arr.shape} to reference shape {target}")
+    for axes in itertools.permutations(range(arr.ndim)):
+        if tuple(arr.shape[axis] for axis in axes) == target:
+            return np.transpose(arr, axes)
+    raise ValueError(f"Cannot align array shape {arr.shape} to reference shape {target}")
+
+
 def _save_nifti_like(path: Path, data: np.ndarray, reference: Any) -> None:
     import nibabel as nib
 
@@ -1266,10 +1429,11 @@ def _write_overlay_png(path: Path, scan: np.ndarray, target: np.ndarray, pred: n
     except ImportError:
         return
 
-    slice_index = _representative_slice(target, pred)
-    image = _normalize_for_overlay(scan[:, :, slice_index])
-    target_slice = target[:, :, slice_index].astype(bool)
-    pred_slice = pred[:, :, slice_index].astype(bool)
+    slice_axis = _overlay_slice_axis(target, pred)
+    slice_index = _representative_slice(target, pred, axis=slice_axis)
+    image = _normalize_for_overlay(np.take(scan, slice_index, axis=slice_axis))
+    target_slice = np.take(target, slice_index, axis=slice_axis).astype(bool)
+    pred_slice = np.take(pred, slice_index, axis=slice_axis).astype(bool)
     rgb = np.stack([image, image, image], axis=-1)
     rgb[target_slice, 1] = 1.0
     rgb[target_slice, 0] *= 0.35
@@ -1280,17 +1444,23 @@ def _write_overlay_png(path: Path, scan: np.ndarray, target: np.ndarray, pred: n
     overlap = np.logical_and(target_slice, pred_slice)
     rgb[overlap] = np.array([1.0, 1.0, 0.0])
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(np.rot90(rgb), interpolation="nearest")
-    ax.set_title(f"slice {slice_index}: target green, prediction red, overlap yellow")
-    ax.axis("off")
-    fig.tight_layout()
-    fig.savefig(path, dpi=160)
-    plt.close(fig)
+    plt.imsave(path, np.rot90(rgb), format="png")
 
 
-def _representative_slice(target: np.ndarray, pred: np.ndarray) -> int:
-    counts = target.astype(bool).sum(axis=(0, 1)) + pred.astype(bool).sum(axis=(0, 1))
+def _overlay_slice_axis(target: np.ndarray, pred: np.ndarray) -> int:
+    shape = tuple(int(v) for v in np.asarray(target).shape)
+    if len(shape) != 3 or tuple(np.asarray(pred).shape) != shape:
+        return 2
+    if shape[0] == shape[1] == shape[2]:
+        return 2
+    return int(np.argmin(shape))
+
+
+def _representative_slice(target: np.ndarray, pred: np.ndarray, *, axis: int | None = None) -> int:
+    if axis is None:
+        axis = 2
+    axes = tuple(i for i in range(np.asarray(target).ndim) if i != axis)
+    counts = target.astype(bool).sum(axis=axes) + pred.astype(bool).sum(axis=axes)
     return int(np.argmax(counts)) if counts.size else 0
 
 

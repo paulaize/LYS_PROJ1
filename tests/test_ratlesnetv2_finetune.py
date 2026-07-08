@@ -18,8 +18,10 @@ from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
     _patch_nibabel_get_data_compat,
     _publish_latest_qc_overlay,
     _save_prediction_artifacts,
+    _scheduler_metric_value,
     _segmentation_metrics,
     _should_export_epoch,
+    _transpose_to_shape,
     _update_best_checkpoints,
     _write_metric_plots,
     _write_run_status,
@@ -694,6 +696,22 @@ def test_best_checkpoint_writer_saves_dice_and_loss_models(tmp_path):
     assert (tmp_path / "best_checkpoints.json").exists()
 
 
+def test_scheduler_metric_value_uses_validation_dice_or_loss():
+    summary = {"dice_mean": 0.53, "loss": 0.42}
+
+    assert _scheduler_metric_value(summary, metric="validation_dice") == (
+        "validation_dice",
+        0.53,
+    )
+    assert _scheduler_metric_value(summary, metric="validation_loss") == (
+        "validation_loss",
+        0.42,
+    )
+
+    with pytest.raises(ValueError, match="Dice is unavailable"):
+        _scheduler_metric_value({"dice_mean": None, "loss": 0.42}, metric="validation_dice")
+
+
 def test_prediction_artifacts_write_nifti_and_overlay(tmp_path):
     pytest.importorskip("matplotlib")
     source_dir = tmp_path / "case"
@@ -732,6 +750,54 @@ def test_prediction_artifacts_write_nifti_and_overlay(tmp_path):
     saved_pred = np.asanyarray(nib.load(record["pred_mask"]).dataobj)
     assert saved_pred.shape == scan.shape
     assert int(saved_pred.sum()) == 1
+
+
+def test_prediction_artifacts_align_transposed_output_to_reference_grid(tmp_path):
+    pytest.importorskip("matplotlib")
+    import matplotlib.image as mpimg
+
+    source_dir = tmp_path / "case"
+    source_dir.mkdir()
+    scan = np.arange(5 * 6 * 3, dtype=np.float32).reshape((5, 6, 3))
+    _write_nifti(source_dir / "scan.nii.gz", scan)
+    x = np.zeros((3, 5, 6, 1), dtype=np.float32)
+    target = np.zeros((1, 2, 3, 5, 6), dtype=np.float32)
+    pred = np.zeros((1, 2, 3, 5, 6), dtype=np.float32)
+    target[:, 0, ...] = 1.0
+    pred[:, 0, ...] = 2.0
+    target[0, 0, 1, 2, 3] = 0.0
+    target[0, 1, 1, 2, 3] = 1.0
+    pred[0, 0, 1, 2, 3] = -2.0
+    pred[0, 1, 1, 2, 3] = 4.0
+
+    class FakeData:
+        list = [source_dir]
+
+    record = _save_prediction_artifacts(
+        x=x,
+        y=target,
+        pred=pred,
+        data=FakeData(),
+        index=0,
+        case_id="case",
+        out_dir=tmp_path / "export",
+        threshold=0.5,
+    )
+
+    saved_pred = np.asanyarray(nib.load(record["pred_mask"]).dataobj)
+    saved_probability = np.asanyarray(nib.load(record["lesion_probability"]).dataobj)
+    assert saved_pred.shape == scan.shape
+    assert saved_probability.shape == scan.shape
+    assert int(saved_pred.sum()) == 1
+    assert saved_pred[2, 3, 1] == 1
+
+    overlay = mpimg.imread(record["overlay"])
+    assert overlay.shape[:2] == (6, 5)
+
+
+def test_transpose_to_shape_rejects_incompatible_shapes():
+    with pytest.raises(ValueError, match="Cannot align"):
+        _transpose_to_shape(np.zeros((3, 5, 6)), (5, 5, 3))
 
 
 def test_latest_qc_overlay_is_published_at_run_root(tmp_path):
@@ -792,6 +858,12 @@ def test_cloud_command_plan_includes_pretrained_model():
         eval_every=1,
         metrics_threshold=0.4,
         early_stop_patience=4,
+        lr_scheduler="reduce-on-plateau",
+        lr_scheduler_metric="validation_dice",
+        lr_plateau_patience=2,
+        lr_plateau_factor=0.5,
+        lr_plateau_min_delta=0.01,
+        min_lr=1e-6,
         export_predictions="validation",
         export_prediction_limit=2,
         export_prediction_epochs="1,final",
@@ -814,6 +886,12 @@ def test_cloud_command_plan_includes_pretrained_model():
     assert "--eval-every 1" in command
     assert "--metrics-threshold 0.4" in command
     assert "--early-stop-patience 4" in command
+    assert "--lr-scheduler reduce-on-plateau" in command
+    assert "--lr-scheduler-metric validation_dice" in command
+    assert "--lr-plateau-patience 2" in command
+    assert "--lr-plateau-factor 0.5" in command
+    assert "--lr-plateau-min-delta 0.01" in command
+    assert "--min-lr 1e-06" in command
     assert "--export-predictions validation" in command
     assert "--export-prediction-limit 2" in command
     assert "--export-prediction-epochs 1,final" in command

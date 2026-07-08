@@ -1,7 +1,7 @@
 """Split an existing prepared RatLesNetV2 dataset into train/validation/test.
 
 This is intended for prepared folders that already contain RatLesNetV2 case
-directories plus a ``manifest.csv``. It is useful when an initial Colab upload
+directories plus a ``manifest.csv``. It is useful when an initial cloud upload
 archive was exported as all-train smoke-test data and needs explicit held-out
 splits before a real training run.
 """

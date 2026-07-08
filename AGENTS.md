@@ -15,6 +15,7 @@ Both modalities eventually register **independently** to the **Allen Mouse Brain
 
 Rationale lives in `docs/`:
 
+- `docs/README.md`
 - `docs/MRI_IHC_pipeline_plan.md`
 - `docs/MRI_IHC_pipeline_plan_DL.md`
 - `docs/development_roadmap.md`

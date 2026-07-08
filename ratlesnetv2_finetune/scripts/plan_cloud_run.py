@@ -1,4 +1,4 @@
-"""Print cloud commands for a prepared RatLesNetV2 dataset."""
+"""Print cloud notebook commands for a prepared RatLesNetV2 dataset."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", required=True, help="RatLesNetV2 dataset YAML plan")
     parser.add_argument(
         "--ratlesnet-repo",
-        default="/content/RatLesNetv2",
+        default="/kaggle/working/RatLesNetv2",
         help="Cloud checkout path for the upstream RatLesNetV2 repo",
     )
     parser.add_argument(
@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Prepared dataset root on the cloud VM. Defaults to output_root/dataset_name.",
     )
-    parser.add_argument("--cloud-output", default="/content/ratlesnet_runs")
+    parser.add_argument("--cloud-output", default="/kaggle/working/ratlesnet_runs")
     parser.add_argument("--pretrained-model", default=None)
     parser.add_argument("--require-pretrained", action="store_true")
     parser.add_argument("--epochs", type=int, default=100)
@@ -37,6 +37,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--early-stop-patience", type=int, default=None)
     parser.add_argument("--early-stop-min-delta", type=float, default=None)
+    parser.add_argument(
+        "--lr-scheduler",
+        choices=["none", "reduce-on-plateau"],
+        default=None,
+    )
+    parser.add_argument(
+        "--lr-scheduler-metric",
+        choices=["validation_dice", "validation_loss"],
+        default=None,
+    )
+    parser.add_argument("--lr-plateau-patience", type=int, default=None)
+    parser.add_argument("--lr-plateau-factor", type=float, default=None)
+    parser.add_argument("--lr-plateau-min-delta", type=float, default=None)
+    parser.add_argument("--min-lr", type=float, default=None)
     parser.add_argument("--export-predictions", default=None)
     parser.add_argument("--export-prediction-limit", type=int, default=None)
     parser.add_argument("--export-prediction-epochs", default=None)
@@ -79,6 +93,12 @@ def main() -> int:
         no_plots=args.no_plots,
         early_stop_patience=args.early_stop_patience,
         early_stop_min_delta=args.early_stop_min_delta,
+        lr_scheduler=args.lr_scheduler,
+        lr_scheduler_metric=args.lr_scheduler_metric,
+        lr_plateau_patience=args.lr_plateau_patience,
+        lr_plateau_factor=args.lr_plateau_factor,
+        lr_plateau_min_delta=args.lr_plateau_min_delta,
+        min_lr=args.min_lr,
         export_predictions=args.export_predictions,
         export_prediction_limit=args.export_prediction_limit,
         export_prediction_epochs=args.export_prediction_epochs,

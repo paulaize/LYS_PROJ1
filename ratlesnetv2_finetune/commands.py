@@ -39,6 +39,12 @@ def build_cloud_command_plan(
     no_plots: bool = False,
     early_stop_patience: int | None = None,
     early_stop_min_delta: float | None = None,
+    lr_scheduler: str | None = None,
+    lr_scheduler_metric: str | None = None,
+    lr_plateau_patience: int | None = None,
+    lr_plateau_factor: float | None = None,
+    lr_plateau_min_delta: float | None = None,
+    min_lr: float | None = None,
     export_predictions: str | None = None,
     export_prediction_limit: int | None = None,
     export_prediction_epochs: str | None = None,
@@ -47,7 +53,7 @@ def build_cloud_command_plan(
     max_test_cases: int | None = None,
     allow_partial_state_dict: bool = False,
 ) -> CloudCommandPlan:
-    """Build reproducible shell commands for a Colab/cloud GPU runtime."""
+    """Build reproducible shell commands for a notebook/cloud GPU runtime."""
     repo_path = str(ratlesnet_repo)
     clone_command = ["git", "clone", "--depth", "1", UPSTREAM_GIT_URL, repo_path]
     finetune_command = [
@@ -93,6 +99,18 @@ def build_cloud_command_plan(
         finetune_command.extend(["--early-stop-patience", str(early_stop_patience)])
     if early_stop_min_delta is not None:
         finetune_command.extend(["--early-stop-min-delta", str(early_stop_min_delta)])
+    if lr_scheduler:
+        finetune_command.extend(["--lr-scheduler", lr_scheduler])
+    if lr_scheduler_metric:
+        finetune_command.extend(["--lr-scheduler-metric", lr_scheduler_metric])
+    if lr_plateau_patience is not None:
+        finetune_command.extend(["--lr-plateau-patience", str(lr_plateau_patience)])
+    if lr_plateau_factor is not None:
+        finetune_command.extend(["--lr-plateau-factor", str(lr_plateau_factor)])
+    if lr_plateau_min_delta is not None:
+        finetune_command.extend(["--lr-plateau-min-delta", str(lr_plateau_min_delta)])
+    if min_lr is not None:
+        finetune_command.extend(["--min-lr", str(min_lr)])
     if export_predictions:
         finetune_command.extend(["--export-predictions", export_predictions])
     if export_prediction_limit is not None:

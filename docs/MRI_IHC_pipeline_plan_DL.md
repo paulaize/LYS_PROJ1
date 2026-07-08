@@ -1,342 +1,147 @@
-# Ischemic-stroke MRI + IHC pipeline — deep-learning-first design (with human-in-the-loop correction)
+# DL-First Future Pipeline
 
-**Goal.** Same end-to-end workflow as the baseline plan — lesion volume from mouse T2 MRI, multiplexed IHC quantification of LYS241 across cell types, both mapped into the Allen CCFv3, one tidy table — but rebuilt so that **every perception task is a deep-learning model**, and **every model output passes through a human correction gate** before it is trusted. The correction edits are versioned and recycled as training data, so the models improve each protocol (active learning).
+This is a future design note. It is not the active v1 implementation plan.
+v1 must finish first with one animal, no atlas, no DL, and reviewed masks.
 
-**Current status note.** This is not the active v1 implementation plan. v1
-should finish with one animal, no atlas, no DL, and a manually reviewed MRI
-lesion mask. The corrected v1 masks become reference data for this later DL
-track.
+## Principle
 
-**What "deep-learning-first" means here (and what it does *not*).** DL replaces every step that involves *interpreting pixels*: brain extraction, lesion segmentation, cell/nucleus detection, cell-type classification, and section-to-atlas alignment. DL does **not** replace the deterministic steps — physical voxel-volume integration, geometric core/peri/contra construction, midline mirroring, the region/compartment join, and table assembly. Forcing a network onto those would add opacity and error for no gain. So this is *deep-learning-first*, not *deep-learning-only*, and that distinction is deliberate.
+DL outputs are drafts. Every pixel-interpretation model must pass through a
+human correction gate before its result is used as scientific data.
 
----
+The corrected outputs become training data for the next model version.
 
-## 0. Architecture at a glance (◆ = DL model, ✎ = human correction gate)
+## What DL Can Replace
 
-```
- MRI ┌──────────────────────────────────────────────────────────────────────────────┐
-     │ Bruker→NIfTI → ◆brain-extract → ◆LESION SEG → ✎BORDER EDIT → edema → volume    │
-     │   (brkraw)      (antspynet)      (An et al./   (ITK-SNAP/    (Swanson/  (Σ area │
-     │                                   nnU-Net)      3D Slicer)    Jacobian)  ×0.5mm)│
-     │                                       │              │                          │
-     │                                       └── corrected mask → ◆MRI→Allen reg ──────┤
-     │                                                            (AIDAmri/ANTs/        │
-     │                                                             learned)             │
-     │                                              core/peri/contra (geometric+mirror) │
-     └──────────────────────────────────────────────────────────────┬─────────────────┘
-                                                                      ▼  (Allen + compartment labels)
- IHC ┌──────────────────────────────────────────────────────────────────────────────┐
-     │ .vsi → QuPath → ◆DeepSlice+ABBA reg → ◆CELL SEG → ✎CELL EDIT → ◆classify →      │
-     │ (BioFormats)     (→Allen CCF)          (InstanSeg/  (QuPath     (cell type)      │
-     │                                         StarDist)    review)                     │
-     │                                              │            │          │           │
-     │                                         per-cell + per-region measurements ──────┤
-     └──────────────────────────────────────────────────────────────┬─────────────────┘
-                                                                      ▼
-                          JOIN on (Allen region, compartment, hemisphere)  →  tidy long table
-                                              │
-                  every ✎ edit ──────────────┴──────────────► fine-tuning set (active learning)
-```
+Appropriate DL tasks:
 
-Both tracks still reach the **Allen CCF** independently and join through it (the bridge principle is unchanged — DL doesn't make a direct MRI↔IHC warp any more trustworthy).
+- brain extraction
+- lesion draft segmentation
+- section-to-atlas initialization
+- nucleus/cell detection
+- cell-type classification where transparent thresholds fail
 
----
+Do not replace deterministic steps:
 
-## 1. Human-in-the-loop design principle (the core of this version)
+- voxel-volume arithmetic
+- Swanson/indirect edema correction
+- physical dilation rings
+- midline mirroring
+- table joins
+- provenance and QC logic
 
-Each DL model is treated as a **fast first draft, never the final word.** After every model runs, a human reviews, edits if needed, and the system records:
+## MRI DL Track
 
-- the **corrected** mask/detections (the ground truth that goes forward),
-- an **edit-magnitude metric** — Dice (or IoU) between the model output and the corrected version, per case,
-- a **reviewer + timestamp** for provenance.
+Inputs remain Scan 2 T2 RARE with anisotropic volume math.
 
-The edit-magnitude does triple duty: (1) per-case QC flag (a heavily edited case is suspect biology *or* a model miss), (2) a model-health signal over time (edits should shrink as the model fine-tunes), and (3) a **prioritization queue** — cases with the largest edits are the highest-value additions to the next fine-tuning round (this is active learning). Target: a human touches *fewer* cases each protocol as the models converge on your specific data.
+Draft lesion options:
 
-> Two correction gates exist: **✎ lesion border editing** (MRI, your explicit request, §2.3) and **✎ cell-detection editing** (IHC, §3.3). Both follow the same record-edit-recycle pattern.
+1. pretrained mouse T2 lesion model, if practical
+2. RatLesNetV2 transfer learning
+3. nnU-Net after enough corrected LYS masks exist
 
----
-
-## 2. MRI track (deep-learning-first)
-
-### 2.1 Inputs
-Lesion-volume workhorse = **Scan 2, RARE T2** (256², FOV 17.92 mm → 70 µm in-plane; 18 slices × 0.5 mm; anisotropic → 2.5-D). T2\* (Scan 3) optional for hemorrhage; TOF (Scan 4) optional for vessels. Bruker→NIfTI via brkraw (you have it).
-
-### 2.2 Brain extraction (◆ DL)
-| Option | Tool | Notes |
-|---|---|---|
-| **A. Learned rodent brain extraction** (recommended) | `antspynet` rodent brain extraction (U-Net) | Robust mouse skull-strip; one call |
-| B. Skip it | — | The An et al. lesion model needs little preprocessing and can run on near-raw scans; brain mask still useful later for normalization/mirroring |
-| C. Classical | Otsu + morphology | Non-DL fallback |
-
-Run **N4 bias correction** (SimpleITK/ANTs) regardless — surface-coil RARE has strong intensity gradients; the lesion model is more stable on flattened images even if it tolerates raw.
-
-### 2.3 Lesion segmentation (◆ DL) → then ✎ **human border correction**
-
-**Segmentation options:**
-
-| Option | Model | Training cost | Fit to your data |
-|---|---|---|---|
-| **A. Pretrained mouse-T2 model** (recommended first) | An et al. 2023 (3D U-Net variant for mouse T2w stroke); open weights + Zenodo dataset | **Zero** — apply as-is | Domain shift risk: built on MCAO/other scanners; your thrombin + surface-coil RARE + anisotropic voxels may differ → must QC |
-| **B. nnU-Net, fine-tuned** | nnU-Net self-configuring 3D framework, initialized from A or trained on your accumulating masks | Low–med (handful of annotated volumes via transfer learning) | Best long-term fit; nnU-Net is the default winner for biomedical 3D seg |
-| C. RatLesNetv2 transfer learning | Rat-trained rodent T2w CNN, adapted through public mouse datasets then LYS | Med (cloud training; public data import + LYS masks) | Good practical branch for rodent lesion priors when LYS data are limited |
-| D. From-scratch | any U-Net | High; needs large n you don't have | Not worth it at your scale |
-
-**RatLesNetV2 branch status.** Branch `dl-ratlesnetv2-finetune` now contains a
-separate `ratlesnetv2_finetune/` folder for preparing reviewed LYS T2w masks in
-the upstream RatLesNetV2 data format and for running a cloud finetuning script.
-It is not a v1 backend. It consumes human-corrected masks from v1/later review
-passes and produces draft DL masks that must return through the same human
-review gate before volume calculations. The current first cloud step is a
-one-case/one-epoch Colab smoke test from
-`~/Desktop/LYS_RatLesNetV2_clean_source/ratlesnetv2_clean_source_reviewed/`.
-That smoke test verifies the prepared data contract and GPU runtime only; it is
-not a model-performance estimate.
-
-**External mouse data for RatLesNetV2 adaptation.** RatLesNetV2's original
-weights come from rat T2w stroke data. The external mouse datasets currently
-identified for adapting it are An et al. 2022, Koch et al. 2017, Knab et al.
-2025, and optionally the full Mulder/Dryad 2017 dataset. Use only manual
-native-space labels for training. Do not use automated masks as ground truth,
-and do not use atlas-space lesion files such as `x_masklesion.nii` for native
-RatLesNetV2 training. Known overlap: An includes a Mulder subset, Knab overlaps
-with An's Charite cases, and Koch has native plus cropped copies. The detailed
-inventory and rules live in `docs/ratlesnetv2_external_datasets.md`.
-
-Geometry mismatch is expected: LYS is `256 x 256 x 18` at
-`0.07 x 0.07 x 0.5 mm`, while representative An/Knab/Koch public mouse scans
-are `256 x 256 x 32` at about `0.1 x 0.1 x 0.5 mm`; a representative
-Mulder/Dryad T2-map header is `128 x 128 x 16` at
-`0.117188 x 0.117188 x 0.5 mm`. Therefore public mouse training is a
-pre-adaptation stage, not final validation. Held-out LYS cases are the only
-valid target-domain test.
-
-**Recommended path:** run **A** on every volume → QC against `3-5` hand-drawn
-masks. If Dice is high, you're nearly done. If it drifts, move to **B** after
-enough corrected masks accumulate. As a practical floor, `8-12` corrected
-stroke masks can support a small transfer-learning attempt; `15-25` is a better
-fine-tuning target. Training from scratch would require substantially more data
-and is not the default plan. Either way, the model output is a *draft* lesion
-mask.
-
-**✎ Human border-correction gate (your explicit step).** Every draft mask is opened in a 3-D label editor; the human refines borders, fills holes, deletes spurious blobs, then saves. Tool options:
-
-| Option | Tool | Pros | Cons |
-|---|---|---|---|
-| **A. ITK-SNAP** (recommended for ergonomics) | Loads NIfTI + mask as a segmentation layer; paintbrush, active-contour, 3-orthogonal-view editing | Purpose-built for exactly this; fast brush; free | Separate app from Fiji |
-| **B. 3D Slicer** | Segment Editor (brush, scissors, islands, threshold-paint, smoothing) | Most powerful 3-D editing; scriptable | Heavier UI |
-| **C. Fiji + Labkit** | Edit labels slice-by-slice | **Keeps your collaborators in Fiji** | Less smooth for true 3-D borders |
-| **D. napari** | Labels layer + brush, in Python | **Native to the Python orchestration**; scriptable correction logging | Editing ergonomics below ITK-SNAP |
-
-Recommendation: **ITK-SNAP or 3D Slicer** for the person doing careful border work; offer **Labkit** so the lab can stay in Fiji; use **napari** if you want the correction step embedded in the Python loop with automatic Dice logging. Whichever you pick, the gate must: save the corrected mask to a versioned path, compute Dice(draft, corrected), and tag the case `edited / unedited` with the editor's name. Those corrected masks are the fine-tuning set for option **B** next round.
-
-### 2.4 Edema correction & volume (deterministic, off the corrected mask)
-- **Swanson/indirect** corrected volume (headline number, matches your prior work), and/or **atlas-Jacobian** edema map (Koch et al. 2019) once registration runs.
-- Volume = Σ(corrected lesion area per slice) × 0.5 mm. Carry raw + corrected + per-slice profile.
-- Note: edema correction runs on the **corrected** mask, so the human edit propagates into the final number — which is the point.
-
-### 2.5 MRI → Allen registration (◆ DL-assisted, or classical)
-| Option | Approach | Notes |
-|---|---|---|
-| **A. AIDAmri** (recommended start) | Purpose-built mouse-T2→Allen, stroke-validated, ships MRI-resolution label atlas | Least custom code; inherits edema map |
-| B. ANTs SyN (`antspyx`) to a mouse MRI template linked to Allen | Classical nonlinear; gold-standard reliability on lesioned brains | You assemble template↔Allen link |
-| C. Learned registration (SynthMorph / VoxelMorph-style) | DL deformable registration | Emerging; **less reliable than SyN on large lesions** — keep as experiment, not primary |
-
-Recommendation: classical/AIDAmri stays primary here — lesion-induced deformation is exactly where learned registration is least trustworthy, so this is a place to resist "DL everywhere." Feed the registrar the **corrected lesion mask** so it can down-weight lesioned tissue (registration in the presence of a lesion is only reliable when informed by a lesion mask).
-
-### 2.6 Compartments (deterministic, from the corrected mask + registration)
-- **Core** = corrected lesion mask. **Péri** = dilation ring (width a tunable parameter, e.g. 0.5–1.0 mm) minus core. **Contra** = core/peri mirrored across the atlas midline. Optionally tag each voxel with its Allen region. Output a per-animal label image in Allen space → travels to the IHC side.
-
----
-
-## 3. IHC track (deep-learning-first)
-
-### 3.1 .vsi + channel map (QC gate, unchanged)
-Bio-Formats reads `.vsi` natively in QuPath/Fiji — keep as working format.
-**Confirm channel→marker map per panel** (Panel A:
-DAPI/NeuroTrace/Podo/FITC; Panel B: DAPI/IBA1/GFAP/FITC). For v1, Panel A
-NeuroTrace is accepted as 640/660 deep-red, so FITC spectral bleed-through is
-not flagged; Paul may still do a later full fluorochrome audit. Anti-IgG
-specificity is resolved as anti-human IgG-FITC specific to humanized LYS241. No
-prior QuPath/IgG-FITC positivity threshold exists for these images, so
-threshold calibration/review remains a pipeline task. DL changes none of the
-remaining threshold QC requirements.
-
-### 3.2 Section → Allen registration (◆ DL)
-| Option | Flow | Notes |
-|---|---|---|
-| **A. DeepSlice (◆) + ABBA, manual BigWarp refine** (recommended) | DeepSlice CNN auto-predicts plane/angle → ABBA affine+spline → human refine on DAPI/white-matter | The DL-native registration path; keeps everyone in QuPath/Fiji |
-| B. ABBA manual | Hand-position | For torn / lesion-distorted sections |
-
-DeepSlice favors brightfield; drive it off the DAPI channel and budget manual refinement on the 5d sections. This *is* a human-in-the-loop registration gate (the BigWarp refine), checked by two people on a subset.
-
-### 3.3 Cell/nucleus segmentation (◆ DL) → then ✎ **human cell correction**
-| Option | Model (in QuPath) | Notes |
-|---|---|---|
-| **A. InstanSeg** (recommended on M1) | Fluorescence/multiplex-aware; Apple-Silicon GPU; strong benchmarks | Verify whole-slide tiling vs a region (some WSI under-detection reports) |
-| B. StarDist | Battle-tested DAPI nuclei; fluorescence model | TensorFlow; CPU-slower on Mac |
-| C. Cellpose | Irregular cells | Heavier setup |
-
-Detect nuclei on **DAPI**, expand a few µm for cytoplasmic/membrane markers.
-
-**✎ Human cell-correction gate (mirror of the lesion gate).** In QuPath, the reviewer adds missed cells, deletes false positives, and fixes obvious mis-segmentations on a sampled set of tiles/regions; QuPath logs the edits. These corrected detections (a) become local ground truth and (b) form a fine-tuning set to specialize StarDist/InstanSeg to your staining — same record-edit-recycle pattern, same Dice/edit-rate logging.
-
-### 3.4 Cell-type classification (◆ DL or simpler)
-| Option | Approach | Notes |
-|---|---|---|
-| **A. QuPath object classifier (trainable)** (recommended) | Train on a few annotated cells per type (neuron/endo/astro/microglia) | Handles overlap; the corrections from §3.3 seed it |
-| B. Threshold per channel | Simple, transparent | Good baseline / sanity check |
-| C. DL patch classifier | A small CNN on cell crops | Overkill unless thresholds fail |
-
-Reminder: **GFAP/IBA1 are morphological** → prefer **area-fraction** (intensity threshold, not DL) over nucleus-based counts; use object counts only for soma density.
-
-### 3.5 Readouts (deterministic measurement)
-Same as baseline, both levels, matched to biology:
-- **Object-level**: per-cell-type IgG-FITC mean intensity + % IgG-FITC-positive
-  of each type; DAPI density (nuclei/mm²). LYS241 association is carried by
-  provenance, not by renaming the measurement.
-- **Area-level**: % positive area for IgG-FITC, GFAP, IBA1 per
-  region×compartment.
-Report both; their disagreement is itself a QC signal.
-
-### 3.6 Compartments in IHC
-Atlas regions from ABBA (per cell). Lesion-derived core/peri/contra pulled in from the **MRI corrected** compartment masks via the shared atlas. For animals without MRI (1h/3h/6h), fall back to a histology-intrinsic core proxy (IgG-leakage / NeuroTrace-loss footprint) + mirrored contra, **flagged as a different `compartment_method`** so the two definitions aren't silently pooled.
-
----
-
-## 4. Integration & output table (deterministic, unchanged)
-Join on `(animal, Allen_region, compartment, hemisphere)`. One **long** row per `animal × region × compartment × cell_type × measure`, with `compartment_method`, `n_cells`, `area_mm2`, and a `qc_flag` (carrying the edit-magnitude signal). Schema identical to the baseline plan — DL changes how cells/lesions are *found*, not how the table is *built*.
-
-| key columns | measure columns | provenance columns |
-|---|---|---|
-| animal_id, timepoint, panel, hemisphere, allen_region, compartment, compartment_method, cell_type | measure, value, unit, n_cells, area_mm2 | model_version, edited(bool), edit_dice, reviewer, qc_flag |
-
-The provenance columns are new vs the baseline and matter here: with DL in the loop you want every number traceable to *which model version* produced it and *whether a human edited it*.
-
----
-
-## 5. The active-learning loop (what makes "DL-first" pay off)
-1. Models run → drafts.
-2. Humans correct at the ✎ gates → corrected ground truth + edit metrics.
-3. Corrected cases (prioritizing high-edit ones) accumulate into per-task fine-tuning sets.
-4. Periodically fine-tune (nnU-Net for lesions; StarDist/InstanSeg for cells) → new model version.
-5. Edit-rate should fall each cycle; when it plateaus near zero, the human gate becomes a light spot-check rather than full review.
-
-This is the mechanism that turns the upfront DL cost into a declining per-protocol cost — and it's why the correction step you asked for is not just QC, but the engine of improvement.
-
----
-
-## 6. Automation architecture
-**Scripted (no clicks):** brkraw conversion, N4, brain extraction, lesion inference (A/B), edema/volume, registration batches, QuPath/ABBA headless runs of saved detection+classifier scripts, table assembly, **and the edit-logging/fine-tuning bookkeeping**. Orchestrate QuPath via CLI/Groovy or `paquo`; orchestrate the MRI DL with the model's own inference script wrapped in Python.
-
-**Interactive (the gates):** channel-map confirmation; **✎ lesion border edit**; ABBA refine; **✎ cell edit**; classifier spot-check; anti-IgG resolution. Everything heavy is automated; the *judgment* lives in the GUIs your lab knows (Fiji/QuPath) plus ITK-SNAP/Slicer/napari for 3-D mask editing.
-
-A per-animal YAML config (paths, panel, timepoint, channel map, peri-ring width, **model versions**) drives one Python entry point. New protocol = new config + possibly a fine-tune, not new code.
-
----
-
-## 7. Build order (DL-first, time-boxed)
-**Phase 1 — prove the DL spine after v1 exists.** MRI: brkraw → N4 →
-**An et al. inference** → open mask in ITK-SNAP/Slicer/napari, hand-correct →
-volume. IHC: one `.vsi` → QuPath → **InstanSeg** on DAPI → manual fix a few
-tiles → % area + per-cell IgG-FITC/LYS241-associated readout. No atlas yet.
-Mini table. *Confirms whether pretrained models transfer to your data before
-you build anything around them.*
-
-**Phase 2 — atlas on both halves.** AIDAmri (MRI→Allen) + DeepSlice/ABBA (IHC→Allen). Regions enter the table.
-
-**Phase 3 — compartments + edema + join + provenance.** Core/peri/contra, Swanson correction, MRI→IHC compartment transfer, the join, edit-logging columns.
-
-**Phase 4 — close the active-learning loop.** Fine-tune nnU-Net or RatLesNetV2
-+ StarDist/InstanSeg on the corrected masks/cells from Phases 1–3; batch all
-animals; YAML configs; QC dashboards. This is where the DL investment compounds
-for the *next* protocol.
-
-**RatLesNetV2 transfer-learning branch.** In parallel with the above, use
-`ratlesnetv2_finetune/` to convert corrected T2w masks to the RatLesNetV2
-folder contract and run cloud smoke tests. The current immediate Colab command
-path is:
+Every draft mask goes through a human correction gate:
 
 ```text
-review LYS masks locally in ITK-SNAP
-  -> prepare `LYS_T2w_manual_v0` locally under work/
-  -> upload `LYS_T2w_manual_v0.tar.gz` to Google Drive
-  -> Colab: clone this branch + upstream RatLesNetV2
-  -> run `finetune_ratlesnetv2` with `--epochs 1 --max-train-cases 1`
+model draft -> ITK-SNAP / 3D Slicer / napari review -> corrected mask
 ```
 
-The intended training sequence after that smoke test is:
+Record:
+
+- model version
+- reviewer
+- edit Dice/IoU
+- QC flag
+- corrected mask path
+
+Corrected masks remain the source of truth for volume and future training.
+
+## RatLesNetV2 Status
+
+RatLesNetV2 is the active DL side branch:
+
+- branch: `dl-ratlesnetv2-finetune`
+- local prep and tests in `lys-bbb`
+- Kaggle preferred for free GPU training
+- Colab fallback
+- upstream rat weights are a rodent prior, not a finished LYS model
+
+Current strategy:
 
 ```text
-RatLesNetV2 rat weights
-  -> public mouse native-space manual masks
-  -> LYS native-space human-reviewed masks
-  -> held-out LYS validation
+main baseline: rat pretrained -> LYS fine-tuning
+comparator:    rat pretrained -> external mouse adaptation -> LYS fine-tuning
 ```
 
-This is useful for evaluating whether RatLesNetV2 transfers to the LYS
-thrombin/surface-coil data, but it does not change the v1 rule that the
-corrected human mask is the source of truth. A real finetune must not use the
-all-LYS-as-train smoke-test split for evaluation; it needs explicit
-train/validation/test splits with held-out LYS animals.
+The direct LYS run is promising:
 
-Stop where accuracy is good enough for the biology. For a 10-animal exploratory study, Phases 1–3 with solid correction gates are likely the right stopping point; Phase 4 is the payoff when this becomes a recurring assay.
+- validation Dice about `0.53` by epoch 10
+- recall improved
+- predicted lesion voxels approached target lesion voxels
+- not background collapse
 
----
+Continue only from best validation-Dice checkpoints with early stopping,
+validation overlays, and LR reduction on plateau. Do not select the final epoch
+automatically. Do not use the held-out LYS test split until the training
+strategy is chosen.
 
-## 8. QC gates
-1. NIfTI header/spacing correct (0.07×0.07×0.5 mm).
-2. Channel map confirmed; Panel A NeuroTrace/FITC spectral overlap ruled out.
-3. N4 flattening visibly OK.
-4. Pretrained lesion model QC'd vs `3-5` corrected manual masks (Dice)
-   **before** trusting it.
-5. **✎ lesion borders reviewed/edited; edit-Dice logged.**
-6. MRI→Allen overlay inspected (esp. large 5d lesions).
-7. DeepSlice/ABBA alignment double-checked on a subset.
-8. Cell detection: InstanSeg vs StarDist agreement on one slide.
-9. **✎ cell detections reviewed/edited on sampled tiles; edit-rate logged.**
-10. anti-IgG specificity resolved as anti-human IgG-FITC specific to LYS241.
-11. Object vs area readouts broadly agree.
-12. Model-version + edited-flag present on every output row.
+Command runbook:
 
----
+- [../ratlesnetv2_finetune/README.md](../ratlesnetv2_finetune/README.md)
 
-## 9. Tools / dependencies
-| Layer | Tool | Role |
-|---|---|---|
-| Bruker IO | brkraw | raw → NIfTI |
-| MRI brain extract | `antspynet` | DL rodent skull-strip |
-| MRI lesion seg | **An et al. weights** (quick baseline) → **RatLesNetV2 public-mouse + LYS fine-tune** or **nnU-Net** | DL draft lesion masks |
-| MRI mask editing | **ITK-SNAP / 3D Slicer** (primary), Fiji-Labkit (lab-familiar), napari (Python-native) | ✎ border correction |
-| MRI registration | AIDAmri / `antspyx` (SyN) | → Allen, edema |
-| Histology IO | QuPath + Bio-Formats | `.vsi`, projects |
-| Section→atlas | **DeepSlice** (◆) + ABBA + BigWarp | IHC → Allen |
-| Cell seg | **InstanSeg** (M1-GPU) + StarDist (validation) | DL detection |
-| Cell classify | QuPath trainable object classifier | by marker |
-| Atlas | BrainGlobe API / Allen CCFv3 | common space |
-| Orchestration | Python (`pathlib`, pandas, PyYAML), `paquo`, `subprocess` | glue, edit-logging, fine-tune bookkeeping |
-| Stats (downstream) | R | mixed models, plots |
+Strategy/reference docs:
 
-**Key references:** An et al. 2022/2023 (mouse T2w DL lesion seg and Zenodo
-data); Valverde et al. (RatLesNetv2); Koch et al. 2017/2019 (mouse stroke MRI
-dataset and atlas edema correction); Mulder et al. 2017 (mouse tMCAO MRI
-dataset); Knab et al. 2025 (mouse MRI outcome dataset); Isensee et al.
-(nnU-Net); Pallast et al. 2019 (AIDAmri); Chiaruttini et al. 2025
-(ABBA+BraiAn); Carey et al. 2023 (DeepSlice); Goldsborough et al. 2024
-(InstanSeg); Schmidt et al. 2018 (StarDist); Bankhead et al. 2017 (QuPath);
-Drieu et al. 2020 (thrombin model).
+- [ratlesnetv2_finetuning_branch.md](ratlesnetv2_finetuning_branch.md)
+- [ratlesnetv2_external_datasets.md](ratlesnetv2_external_datasets.md)
 
----
+## IHC DL Track
 
-## 10. Where this plan deliberately resists DL
-Being honest so you can defend the choices: **volume integration, geometric compartments, midline mirroring, the region/compartment join, and the table** stay deterministic — they're exact arithmetic/geometry where a network only adds error and opacity. **Atlas registration of lesioned brains** stays classical (SyN/AIDAmri) because learned deformable registration is least reliable exactly where deformation is largest. And **GFAP/IBA1 quantification** stays area-fraction, not cell-DL, because the biology is morphological. "Deep-learning-first" means DL owns every pixel-interpretation task and every one gets a human gate — not that DL is bolted onto steps that don't need it.
+Future IHC DL work should start after the v1 positive-area path is reliable.
 
-### Open items to finalize (same as baseline)
-1. NeuroTrace variant/emission: accepted for v1 as 640/660 deep-red; later full
-   fluorochrome audit optional.
-2. Exact `.vsi` channel order per panel for new animals. The current
-   `BD_08_5D` maps are in its animal YAML.
-3. IgG-FITC positivity threshold calibration from configured controls / approved
-   rule. There is no prior QuPath threshold to reuse.
-4. AIDAmri wholesale vs leaner ANTs-only for MRI→Allen.
-5. Péri-lesional ring width.
-6. **Which 3-D mask editor** the lesion reviewer will standardize on (ITK-SNAP / 3D Slicer / Fiji-Labkit / napari).
+Likely order:
+
+1. keep QuPath/Bio-Formats `.vsi` as the working format
+2. confirm channel maps from YAML
+3. use ABBA/DeepSlice for section-to-Allen initialization
+4. use InstanSeg or StarDist for DAPI nuclei/cell detection
+5. review/edit sampled tiles in QuPath
+6. train/refine object classifiers for cell type
+7. keep GFAP/IBA1 area fractions as primary morphology readouts
+
+IgG-FITC threshold calibration remains required. DL does not resolve positivity
+thresholding or specificity provenance.
+
+## Active-Learning Loop
+
+For lesions and cells:
+
+```text
+model runs
+-> human edits
+-> edit metric + corrected output saved
+-> high-edit cases prioritized for fine-tuning
+-> new model version
+```
+
+Adopt a DL backend only if it reduces human edit burden against corrected LYS
+data. Public mouse or public histology performance is not enough.
+
+## QC Gates
+
+- NIfTI spacing/header validated
+- corrected masks used for volume
+- model version recorded
+- edit metric recorded
+- validation overlays reviewed
+- IgG-FITC threshold approved
+- object-level and area-level IHC readouts checked for gross disagreement
+- held-out LYS test used only once for final model evaluation
+
+## Open Decisions
+
+- when enough corrected LYS masks exist for nnU-Net or further RatLesNetV2
+  fine-tuning
+- final mask editor standard for careful MRI border work
+- AIDAmri vs ANTs/SyN for MRI->Allen
+- perilesional ring width
+- whether direct QuPath CLI remains acceptable or a project/cached workflow is
+  required for `.vsi` scale
