@@ -34,6 +34,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-every", type=int, default=1)
     parser.add_argument("--eval-train", action="store_true")
     parser.add_argument("--metrics-threshold", type=float, default=0.5)
+    parser.add_argument(
+        "--loss",
+        choices=[
+            "ce-dice",
+            "cross-entropy",
+            "dice",
+            "weighted-ce-dice",
+            "tversky",
+            "focal-tversky",
+        ],
+        default=None,
+    )
+    parser.add_argument("--background-class-weight", type=float, default=None)
+    parser.add_argument("--lesion-class-weight", type=float, default=None)
+    parser.add_argument("--tversky-alpha", type=float, default=None)
+    parser.add_argument("--tversky-beta", type=float, default=None)
+    parser.add_argument("--focal-tversky-gamma", type=float, default=None)
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--early-stop-patience", type=int, default=None)
     parser.add_argument("--early-stop-min-delta", type=float, default=None)
@@ -90,6 +107,12 @@ def main() -> int:
         eval_every=args.eval_every,
         eval_train=args.eval_train,
         metrics_threshold=args.metrics_threshold,
+        loss=args.loss,
+        background_class_weight=args.background_class_weight,
+        lesion_class_weight=args.lesion_class_weight,
+        tversky_alpha=args.tversky_alpha,
+        tversky_beta=args.tversky_beta,
+        focal_tversky_gamma=args.focal_tversky_gamma,
         no_plots=args.no_plots,
         early_stop_patience=args.early_stop_patience,
         early_stop_min_delta=args.early_stop_min_delta,

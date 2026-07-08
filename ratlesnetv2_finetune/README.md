@@ -340,6 +340,170 @@ for name in [
         display(Image(filename=str(path)))
 ```
 
+## Kaggle Training Grid And Report
+
+Use the grid runner when you want to launch several controlled experiments and
+get one comparison report. The default config is:
+
+```text
+ratlesnetv2_finetune/configs/kaggle_experiment_grid.yml
+```
+
+It currently enables four direct LYS experiments:
+
+- `ratlesnet_direct_lr5e5`
+- `ratlesnet_direct_lr1e5`
+- `an2023_direct_lr1e5`
+- `an2023_direct_lr5e6`
+
+The external mouse stage is present but disabled in the YAML until direct LYS
+baselines are reviewed.
+
+Kaggle setup after cloning/pulling this branch and creating the split folders:
+
+```python
+%cd /kaggle/working
+!test -d RatLesNetv2 || git clone --depth 1 https://github.com/jmlipman/RatLesNetv2.git RatLesNetv2
+!test -d stroke-lesion-segmentation || git clone --depth 1 https://github.com/scalableminds/stroke-lesion-segmentation.git
+
+%cd /kaggle/working/LYS_PROJ1
+!test -f ratlesnetv2_finetune/scripts/run_training_grid.py
+!test -f ratlesnetv2_finetune/scripts/summarize_training_grid.py
+!test -f ratlesnetv2_finetune/scripts/finetune_an2023.py
+```
+
+First inspect the planned commands without running them:
+
+```python
+%cd /kaggle/working/LYS_PROJ1
+
+!python -m ratlesnetv2_finetune.scripts.run_training_grid \
+  --config ratlesnetv2_finetune/configs/kaggle_experiment_grid.yml \
+  --dry-run
+```
+
+Run the enabled grid and automatically write the report:
+
+```python
+!python -m ratlesnetv2_finetune.scripts.run_training_grid \
+  --config ratlesnetv2_finetune/configs/kaggle_experiment_grid.yml
+```
+
+Outputs:
+
+```text
+/kaggle/working/model_grid_runs/
+  command_plan.sh
+  grid_run_records.json
+  ratlesnet_direct_lr5e5/1/
+  ratlesnet_direct_lr1e5/1/
+  an2023_direct_lr1e5/1/
+  an2023_direct_lr5e6/1/
+
+/kaggle/working/model_comparison/
+  comparison.csv
+  comparison.md
+  report.html
+  qc_contact_sheet.png
+  selected_recommendation.json
+  overlays/
+```
+
+If a Kaggle session stops, rerun with `--skip-existing` to avoid repeating
+completed experiments:
+
+```python
+!python -m ratlesnetv2_finetune.scripts.run_training_grid \
+  --config ratlesnetv2_finetune/configs/kaggle_experiment_grid.yml \
+  --skip-existing
+```
+
+You can also run only selected experiments:
+
+```python
+!python -m ratlesnetv2_finetune.scripts.run_training_grid \
+  --config ratlesnetv2_finetune/configs/kaggle_experiment_grid.yml \
+  --only ratlesnet_direct_lr1e5,an2023_direct_lr1e5
+```
+
+Inspect the report inside the notebook:
+
+```python
+from pathlib import Path
+import pandas as pd
+from IPython.display import HTML, Image, display
+
+report = Path("/kaggle/working/model_comparison")
+display(pd.read_csv(report / "comparison.csv"))
+
+sheet = report / "qc_contact_sheet.png"
+if sheet.exists():
+    display(Image(filename=str(sheet)))
+
+html = report / "report.html"
+if html.exists():
+    display(HTML(html.read_text()))
+```
+
+To summarize existing runs without launching new training:
+
+```python
+!python -m ratlesnetv2_finetune.scripts.summarize_training_grid \
+  --grid-root /kaggle/working/model_grid_runs \
+  --output /kaggle/working/model_comparison
+```
+
+Decision rule:
+
+1. Exclude runs with anatomically bad QC overlays.
+2. Among acceptable overlays, prefer the highest LYS validation Dice.
+3. If Dice is close, prefer better precision/recall balance and
+   `pred_to_target_voxel_ratio` closer to `1`.
+4. Do not use the held-out LYS test split for this grid.
+
+## RatLesNetV2 Loss Options
+
+RatLesNetV2 still defaults to the upstream loss:
+
+```text
+--loss ce-dice
+```
+
+Additional experimental losses are available:
+
+```text
+--loss cross-entropy
+--loss dice
+--loss weighted-ce-dice --lesion-class-weight 5
+--loss tversky --tversky-alpha 0.3 --tversky-beta 0.7
+--loss focal-tversky --tversky-alpha 0.3 --tversky-beta 0.7 --focal-tversky-gamma 0.75
+```
+
+For lesion segmentation, `tversky_alpha=0.3` and `tversky_beta=0.7` penalize
+false negatives more than false positives, which may help recall if the model
+is too conservative. Weighted CE + Dice may help if lesion voxels remain
+underpredicted. Keep these as validation-only experiments; do not use the LYS
+test split for loss selection.
+
+The epoch log now prints more validation signal, for example:
+
+```text
+Epoch: 1. Loss: 0.03367139. Val Loss: 0.012572014. LR: 1e-05. validation Dice: 0.6176 Prec: 0.7 Rec: 0.6 TP/Target: 60.0% Pred/Target: 0.9x Acc: 0.9981.
+```
+
+`TP/Target` is the percentage of labeled lesion voxels recovered by the
+prediction. It is equivalent to aggregate lesion recall, but it is printed
+explicitly because it is easier to read during training.
+
+The default grid includes disabled examples for:
+
+- `ratlesnet_direct_tversky_lr1e5`
+- `ratlesnet_direct_focal_tversky_lr1e5`
+- `ratlesnet_direct_weighted_ce_dice_lr1e5`
+
+Enable them by changing `enabled: false` to `enabled: true` in
+`ratlesnetv2_finetune/configs/kaggle_experiment_grid.yml`.
+
 ## Continue Direct LYS Baseline
 
 Continue from the best validation-Dice checkpoint, not the final epoch. Replace

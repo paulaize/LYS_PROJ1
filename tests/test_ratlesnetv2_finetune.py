@@ -3,6 +3,7 @@ import json
 import struct
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import nibabel as nib
 import numpy as np
@@ -19,6 +20,8 @@ from ratlesnetv2_finetune.scripts.finetune_an2023 import (
     _restore_crop_or_pad,
 )
 from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
+    _build_loss_fn,
+    _format_epoch_metrics,
     _parse_export_epochs,
     _parse_export_splits,
     _patch_nibabel_get_data_compat,
@@ -45,7 +48,9 @@ from ratlesnetv2_finetune.scripts.review_lys_masks_itksnap import (
     validate_grid,
     wait_for_next_case,
 )
+from ratlesnetv2_finetune.scripts.run_training_grid import build_experiment_commands
 from ratlesnetv2_finetune.scripts.split_prepared_dataset import split_prepared_dataset
+from ratlesnetv2_finetune.scripts.summarize_training_grid import summarize_runs
 from ratlesnetv2_finetune.source_folders import add_source_folder_to_plan
 
 SPACING = (0.07, 0.07, 0.5)
@@ -225,6 +230,209 @@ def test_an2023_find_cases_uses_prepared_ratlesnet_layout(tmp_path):
     assert cases[0].case_id == "BD_01_5d"
     assert cases[0].scan == case_dir / "scan.nii.gz"
     assert cases[0].label == case_dir / "scan_lesionIAM.nii.gz"
+
+
+def test_epoch_log_metrics_include_precision_recall_and_voxel_recovery():
+    text = _format_epoch_metrics(
+        [
+            {
+                "split": "validation",
+                "dice_mean": 0.6176,
+                "precision_mean": 0.7,
+                "recall_mean": 0.6,
+                "accuracy_mean": 0.9981,
+                "tp": 60,
+                "target_voxels": 100,
+                "pred_voxels": 90,
+            }
+        ]
+    )
+
+    assert "validation Dice: 0.6176" in text
+    assert "Prec: 0.7" in text
+    assert "Rec: 0.6" in text
+    assert "TP/Target: 60.0%" in text
+    assert "Pred/Target: 0.9x" in text
+
+
+def test_ratlesnet_loss_builder_keeps_default_and_supports_tversky():
+    torch = pytest.importorskip("torch")
+
+    default_args = SimpleNamespace(
+        loss="ce-dice",
+        background_class_weight=1.0,
+        lesion_class_weight=1.0,
+        tversky_alpha=0.3,
+        tversky_beta=0.7,
+        focal_tversky_gamma=0.75,
+    )
+
+    def upstream(_pred, _target):
+        return torch.tensor(2.0)
+
+    default_loss = _build_loss_fn(
+        torch=torch,
+        upstream_ce_dice_loss=upstream,
+        args=default_args,
+    )
+    assert default_loss is upstream
+
+    tversky_args = SimpleNamespace(**{**vars(default_args), "loss": "tversky"})
+    loss_fn = _build_loss_fn(torch=torch, upstream_ce_dice_loss=upstream, args=tversky_args)
+    pred = torch.zeros((1, 2, 2, 2, 2), dtype=torch.float32)
+    target = torch.zeros((1, 2, 2, 2, 2), dtype=torch.float32)
+    pred[:, 0] = 1.0
+    target[:, 0] = 1.0
+    pred[:, 1, 0, 0, 0] = 0.8
+    pred[:, 0, 0, 0, 0] = 0.2
+    target[:, 1, 0, 0, 0] = 1.0
+    target[:, 0, 0, 0, 0] = 0.0
+
+    loss = loss_fn(pred, target)
+
+    assert float(loss.detach().cpu()) < 0.5
+
+
+def test_training_grid_builds_ratlesnet_and_an2023_commands(tmp_path):
+    config = {
+        "output_root": str(tmp_path / "grid"),
+        "splits": {
+            "lys_train": "/kaggle/working/lys/train",
+            "lys_validation": "/kaggle/working/lys/validation",
+        },
+        "paths": {
+            "ratlesnet_repo": "/kaggle/working/RatLesNetv2",
+            "ratlesnet_pretrained": "/kaggle/working/RatLesNetv2/model",
+            "an2023_model": "/kaggle/working/stroke-lesion-segmentation/lesion_model.pt",
+        },
+        "defaults": {
+            "gpu": 0,
+            "save_every": 1,
+            "eval_every": 1,
+            "export_predictions": "validation",
+        },
+        "experiments": [
+            {
+                "name": "rat_direct",
+                "kind": "ratlesnetv2",
+                "input": "lys_train",
+                "validation": "lys_validation",
+                "ratlesnet_repo": "ratlesnet_repo",
+                "pretrained_model": "ratlesnet_pretrained",
+                "require_pretrained": True,
+                "epochs": 2,
+                "lr": 5e-5,
+                "loss": "focal-tversky",
+                "tversky_alpha": 0.3,
+                "tversky_beta": 0.7,
+                "focal_tversky_gamma": 0.75,
+            },
+            {
+                "name": "an_direct",
+                "kind": "an2023",
+                "input": "lys_train",
+                "validation": "lys_validation",
+                "model_path": "an2023_model",
+                "epochs": 2,
+                "lr": 1e-5,
+                "metrics_threshold": 0.8,
+            },
+        ],
+    }
+
+    commands = build_experiment_commands(config)
+
+    assert len(commands) == 2
+    rat_cmd = commands[0].command
+    an_cmd = commands[1].command
+    assert "ratlesnetv2_finetune.scripts.finetune_ratlesnetv2" in rat_cmd
+    assert "--require-pretrained" in rat_cmd
+    assert "--loss" in rat_cmd
+    assert "focal-tversky" in rat_cmd
+    assert "--focal-tversky-gamma" in rat_cmd
+    assert "/kaggle/working/lys/train" in rat_cmd
+    assert "ratlesnetv2_finetune.scripts.finetune_an2023" in an_cmd
+    assert "--metrics-threshold" in an_cmd
+    assert "/kaggle/working/stroke-lesion-segmentation/lesion_model.pt" in an_cmd
+
+
+def test_summarize_runs_writes_comparison_report(tmp_path):
+    run_dir = tmp_path / "grid" / "rat_direct" / "1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "experiment_metadata.json").write_text(
+        json.dumps({"name": "rat_direct", "kind": "ratlesnetv2"})
+    )
+    (run_dir / "run_status.json").write_text(json.dumps({"status": "completed"}))
+    (run_dir / "best_checkpoints.json").write_text(
+        json.dumps(
+            {
+                "validation_dice": {
+                    "epoch": 2,
+                    "filename": "best_by_validation_dice.model",
+                }
+            }
+        )
+    )
+    (run_dir / "best_by_validation_dice.model").write_text("weights")
+    overlay = run_dir / "latest_validation_qc_overlay.png"
+    overlay.write_bytes(b"not-a-real-png")
+    (run_dir / "latest_validation_qc_overlay.json").write_text(
+        json.dumps({"latest_overlay": str(overlay)})
+    )
+    with (run_dir / "metrics_epoch.csv").open("w", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=[
+                "epoch",
+                "split",
+                "n_cases",
+                "lr",
+                "loss",
+                "dice_mean",
+                "precision_mean",
+                "recall_mean",
+                "target_voxels",
+                "pred_voxels",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "epoch": 1,
+                "split": "validation",
+                "n_cases": 2,
+                "lr": 0.00005,
+                "loss": 0.8,
+                "dice_mean": 0.4,
+                "precision_mean": 0.5,
+                "recall_mean": 0.6,
+                "target_voxels": 100,
+                "pred_voxels": 80,
+            }
+        )
+        writer.writerow(
+            {
+                "epoch": 2,
+                "split": "validation",
+                "n_cases": 2,
+                "lr": 0.00005,
+                "loss": 0.7,
+                "dice_mean": 0.55,
+                "precision_mean": 0.65,
+                "recall_mean": 0.7,
+                "target_voxels": 100,
+                "pred_voxels": 95,
+            }
+        )
+
+    summaries = summarize_runs(run_dirs=[run_dir], output_dir=tmp_path / "report")
+
+    assert summaries[0].best_validation_dice == pytest.approx(0.55)
+    comparison = (tmp_path / "report" / "comparison.csv").read_text()
+    assert "rat_direct" in comparison
+    assert "0.55" in comparison
+    assert (tmp_path / "report" / "report.html").exists()
+    assert (tmp_path / "report" / "selected_recommendation.json").exists()
 
 
 def test_prepare_dataset_rejects_spacing_mismatch(tmp_path):
@@ -899,6 +1107,12 @@ def test_cloud_command_plan_includes_pretrained_model():
         eval_only=True,
         eval_every=1,
         metrics_threshold=0.4,
+        loss="weighted-ce-dice",
+        background_class_weight=1.0,
+        lesion_class_weight=5.0,
+        tversky_alpha=0.3,
+        tversky_beta=0.7,
+        focal_tversky_gamma=0.75,
         early_stop_patience=4,
         lr_scheduler="reduce-on-plateau",
         lr_scheduler_metric="validation_dice",
@@ -927,6 +1141,12 @@ def test_cloud_command_plan_includes_pretrained_model():
     assert "--eval-only" in command
     assert "--eval-every 1" in command
     assert "--metrics-threshold 0.4" in command
+    assert "--loss weighted-ce-dice" in command
+    assert "--background-class-weight 1.0" in command
+    assert "--lesion-class-weight 5.0" in command
+    assert "--tversky-alpha 0.3" in command
+    assert "--tversky-beta 0.7" in command
+    assert "--focal-tversky-gamma 0.75" in command
     assert "--early-stop-patience 4" in command
     assert "--lr-scheduler reduce-on-plateau" in command
     assert "--lr-scheduler-metric validation_dice" in command

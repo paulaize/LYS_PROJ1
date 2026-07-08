@@ -77,6 +77,49 @@ def parse_args() -> argparse.Namespace:
         help="Threshold for one-channel binary model outputs. Two-channel outputs use argmax.",
     )
     parser.add_argument(
+        "--loss",
+        choices=[
+            "ce-dice",
+            "cross-entropy",
+            "dice",
+            "weighted-ce-dice",
+            "tversky",
+            "focal-tversky",
+        ],
+        default="ce-dice",
+        help="Training loss. Default ce-dice is the upstream RatLesNetV2 loss.",
+    )
+    parser.add_argument(
+        "--background-class-weight",
+        type=float,
+        default=1.0,
+        help="Background CE weight for --loss weighted-ce-dice.",
+    )
+    parser.add_argument(
+        "--lesion-class-weight",
+        type=float,
+        default=1.0,
+        help="Lesion CE weight for --loss weighted-ce-dice.",
+    )
+    parser.add_argument(
+        "--tversky-alpha",
+        type=float,
+        default=0.3,
+        help="False-positive penalty for Tversky/Focal-Tversky losses.",
+    )
+    parser.add_argument(
+        "--tversky-beta",
+        type=float,
+        default=0.7,
+        help="False-negative penalty for Tversky/Focal-Tversky losses.",
+    )
+    parser.add_argument(
+        "--focal-tversky-gamma",
+        type=float,
+        default=0.75,
+        help="Focal exponent for --loss focal-tversky.",
+    )
+    parser.add_argument(
         "--no-plots",
         action="store_true",
         help="Disable PNG metric plots. By default plots are updated when metrics are written.",
@@ -230,6 +273,7 @@ def main() -> int:
         raise ValueError("--lr-plateau-factor must be > 0 and < 1")
     if args.min_lr < 0.0:
         raise ValueError("--min-lr must be >= 0")
+    loss_fn = _build_loss_fn(torch=torch, upstream_ce_dice_loss=CrossEntropyDiceLoss, args=args)
 
     model = RatLesNetv2(modalities=args.modalities, filters=args.filters)
     model.to(device)
@@ -266,7 +310,7 @@ def main() -> int:
     if args.eval_only:
         summaries = _evaluate_requested_splits(
             model=model,
-            loss_fn=CrossEntropyDiceLoss,
+            loss_fn=loss_fn,
             torch=torch,
             threshold=args.metrics_threshold,
             epoch=0,
@@ -320,7 +364,7 @@ def main() -> int:
             train_loss = _run_epoch(
                 model=model,
                 data=train_data,
-                loss_fn=CrossEntropyDiceLoss,
+                loss_fn=loss_fn,
                 optimizer=optimizer,
             )
             _append_loss(run_dir / "training_loss", train_loss)
@@ -336,7 +380,7 @@ def main() -> int:
                     epoch=epoch_num,
                     model=model,
                     data=train_data,
-                    loss_fn=CrossEntropyDiceLoss,
+                    loss_fn=loss_fn,
                     torch=torch,
                     threshold=args.metrics_threshold,
                 )
@@ -347,7 +391,7 @@ def main() -> int:
                     epoch=epoch_num,
                     model=model,
                     data=val_data,
-                    loss_fn=CrossEntropyDiceLoss,
+                    loss_fn=loss_fn,
                     torch=torch,
                     threshold=args.metrics_threshold,
                 )
@@ -459,7 +503,7 @@ def main() -> int:
                 epoch=completed_epoch,
                 model=model,
                 data=val_data,
-                loss_fn=CrossEntropyDiceLoss,
+                loss_fn=loss_fn,
                 torch=torch,
                 threshold=args.metrics_threshold,
             )
@@ -471,7 +515,7 @@ def main() -> int:
                 epoch=completed_epoch,
                 model=model,
                 data=test_data,
-                loss_fn=CrossEntropyDiceLoss,
+                loss_fn=loss_fn,
                 torch=torch,
                 threshold=args.metrics_threshold,
             )
@@ -607,6 +651,109 @@ def _build_lr_scheduler(*, torch: Any, optimizer: Any, args: argparse.Namespace)
         threshold_mode="abs",
         min_lr=args.min_lr,
     )
+
+
+def _build_loss_fn(*, torch: Any, upstream_ce_dice_loss: Any, args: argparse.Namespace) -> Any:
+    _validate_loss_args(args)
+    if args.loss == "ce-dice":
+        return upstream_ce_dice_loss
+
+    def loss_fn(y_pred: Any, y_true: Any) -> Any:
+        if args.loss == "cross-entropy":
+            return _probability_cross_entropy_loss(torch, y_pred, y_true)
+        if args.loss == "dice":
+            return _soft_dice_loss(torch, y_pred, y_true)
+        if args.loss == "weighted-ce-dice":
+            weights = (args.background_class_weight, args.lesion_class_weight)
+            return _probability_cross_entropy_loss(
+                torch,
+                y_pred,
+                y_true,
+                class_weights=weights,
+            ) + _soft_dice_loss(torch, y_pred, y_true)
+        if args.loss == "tversky":
+            return _tversky_loss(
+                torch,
+                y_pred,
+                y_true,
+                alpha=args.tversky_alpha,
+                beta=args.tversky_beta,
+            )
+        if args.loss == "focal-tversky":
+            tversky = _tversky_loss(
+                torch,
+                y_pred,
+                y_true,
+                alpha=args.tversky_alpha,
+                beta=args.tversky_beta,
+            )
+            return torch.pow(tversky, args.focal_tversky_gamma)
+        raise ValueError(f"Unsupported loss: {args.loss!r}")
+
+    return loss_fn
+
+
+def _validate_loss_args(args: argparse.Namespace) -> None:
+    if args.background_class_weight <= 0.0:
+        raise ValueError("--background-class-weight must be > 0")
+    if args.lesion_class_weight <= 0.0:
+        raise ValueError("--lesion-class-weight must be > 0")
+    if args.tversky_alpha < 0.0:
+        raise ValueError("--tversky-alpha must be >= 0")
+    if args.tversky_beta < 0.0:
+        raise ValueError("--tversky-beta must be >= 0")
+    if args.tversky_alpha + args.tversky_beta <= 0.0:
+        raise ValueError("--tversky-alpha + --tversky-beta must be > 0")
+    if args.focal_tversky_gamma <= 0.0:
+        raise ValueError("--focal-tversky-gamma must be > 0")
+
+
+def _probability_cross_entropy_loss(
+    torch: Any,
+    y_pred: Any,
+    y_true: Any,
+    *,
+    class_weights: tuple[float, float] | None = None,
+) -> Any:
+    probs = torch.clamp(y_pred, 1e-7, 1.0)
+    ce = y_true * torch.log(probs)
+    if class_weights is not None:
+        weights = torch.tensor(class_weights, dtype=probs.dtype, device=probs.device)
+        shape = [1, -1] + [1] * (probs.ndim - 2)
+        ce = ce * weights.reshape(shape)
+    return -torch.mean(torch.sum(ce, dim=1))
+
+
+def _soft_dice_loss(torch: Any, y_pred: Any, y_true: Any, *, eps: float = 1e-6) -> Any:
+    num = 2.0 * torch.sum(y_pred * y_true, dim=(1, 2, 3, 4))
+    denom = torch.sum(torch.pow(y_pred, 2) + torch.pow(y_true, 2), dim=(1, 2, 3, 4))
+    return 1.0 - torch.mean(num / (denom + eps))
+
+
+def _tversky_loss(
+    torch: Any,
+    y_pred: Any,
+    y_true: Any,
+    *,
+    alpha: float,
+    beta: float,
+    eps: float = 1e-6,
+) -> Any:
+    pred = _lesion_channel(y_pred)
+    target = _lesion_channel(y_true)
+    tp = torch.sum(pred * target)
+    fp = torch.sum(pred * (1.0 - target))
+    fn = torch.sum((1.0 - pred) * target)
+    tversky = (tp + eps) / (tp + alpha * fp + beta * fn + eps)
+    return 1.0 - tversky
+
+
+def _lesion_channel(value: Any) -> Any:
+    if value.ndim >= 5 and value.shape[1] > 1:
+        return value[:, 1, ...]
+    if value.ndim >= 5:
+        return value[:, 0, ...]
+    return value
 
 
 def _scheduler_metric_value(
@@ -984,13 +1131,32 @@ def _format_epoch_metrics(summaries: list[EvaluationSummary]) -> str:
     parts = []
     for summary in summaries:
         dice = _format_optional(summary["dice_mean"])
+        precision = _format_optional(summary["precision_mean"])
+        recall = _format_optional(summary["recall_mean"])
         accuracy = _format_optional(summary["accuracy_mean"])
-        parts.append(f" {summary['split']} Dice: {dice} Acc: {accuracy}.")
+        tp_target = _format_percent(
+            _safe_div(summary.get("tp", 0), summary.get("target_voxels", 0))
+        )
+        pred_target = _format_ratio(
+            _safe_div(summary.get("pred_voxels", 0), summary.get("target_voxels", 0))
+        )
+        parts.append(
+            f" {summary['split']} Dice: {dice} Prec: {precision} Rec: {recall} "
+            f"TP/Target: {tp_target} Pred/Target: {pred_target} Acc: {accuracy}."
+        )
     return "".join(parts)
 
 
 def _format_optional(value: float | None) -> str:
     return "NA" if value is None else f"{value:.4g}"
+
+
+def _format_percent(value: float | None) -> str:
+    return "NA" if value is None else f"{100.0 * value:.1f}%"
+
+
+def _format_ratio(value: float | None) -> str:
+    return "NA" if value is None else f"{value:.3g}x"
 
 
 def _append_loss(path: Path, loss: float) -> None:

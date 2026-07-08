@@ -36,6 +36,12 @@ def build_cloud_command_plan(
     eval_every: int | None = None,
     eval_train: bool = False,
     metrics_threshold: float | None = None,
+    loss: str | None = None,
+    background_class_weight: float | None = None,
+    lesion_class_weight: float | None = None,
+    tversky_alpha: float | None = None,
+    tversky_beta: float | None = None,
+    focal_tversky_gamma: float | None = None,
     no_plots: bool = False,
     early_stop_patience: int | None = None,
     early_stop_min_delta: float | None = None,
@@ -93,6 +99,18 @@ def build_cloud_command_plan(
         finetune_command.append("--eval-train")
     if metrics_threshold is not None:
         finetune_command.extend(["--metrics-threshold", str(metrics_threshold)])
+    if loss is not None:
+        finetune_command.extend(["--loss", str(loss)])
+    if background_class_weight is not None:
+        finetune_command.extend(["--background-class-weight", str(background_class_weight)])
+    if lesion_class_weight is not None:
+        finetune_command.extend(["--lesion-class-weight", str(lesion_class_weight)])
+    if tversky_alpha is not None:
+        finetune_command.extend(["--tversky-alpha", str(tversky_alpha)])
+    if tversky_beta is not None:
+        finetune_command.extend(["--tversky-beta", str(tversky_beta)])
+    if focal_tversky_gamma is not None:
+        finetune_command.extend(["--focal-tversky-gamma", str(focal_tversky_gamma)])
     if no_plots:
         finetune_command.append("--no-plots")
     if early_stop_patience is not None:

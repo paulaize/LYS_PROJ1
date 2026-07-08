@@ -1,0 +1,137 @@
+# Kaggle experiment grid for LYS lesion segmentation model comparison.
+#
+# Run from /kaggle/working/LYS_PROJ1 after creating the prepared split folders.
+# The held-out LYS test split is intentionally not listed here.
+
+output_root: /kaggle/working/model_grid_runs
+report_root: /kaggle/working/model_comparison
+python: python
+max_report_overlays: 12
+
+splits:
+  lys_train: /kaggle/working/LYS_T2w_manual_v0_split/train
+  lys_validation: /kaggle/working/LYS_T2w_manual_v0_split/validation
+  external_train: /kaggle/working/External_Mouse_T2w_manual_LSP_SI_v0_split/train
+
+paths:
+  ratlesnet_repo: /kaggle/working/RatLesNetv2
+  ratlesnet_pretrained: /kaggle/working/RatLesNetv2/trained_models/Table2-3/RatLesNetv2/homogeneous/model-1
+  an2023_model: /kaggle/working/stroke-lesion-segmentation/lesion_model.pt
+
+defaults:
+  gpu: 0
+  save_every: 1
+  eval_every: 1
+  early_stop_patience: 8
+  lr_scheduler: reduce-on-plateau
+  lr_scheduler_metric: validation_dice
+  lr_plateau_patience: 3
+  lr_plateau_factor: 0.5
+  min_lr: 1e-6
+  export_predictions: validation
+  export_prediction_limit: 8
+  export_prediction_epochs: all
+
+experiments:
+  - name: ratlesnet_direct_lr5e5
+    kind: ratlesnetv2
+    input: lys_train
+    validation: lys_validation
+    ratlesnet_repo: ratlesnet_repo
+    pretrained_model: ratlesnet_pretrained
+    require_pretrained: true
+    epochs: 15
+    lr: 5e-5
+    loadMemory: 0
+
+  - name: ratlesnet_direct_lr1e5
+    kind: ratlesnetv2
+    input: lys_train
+    validation: lys_validation
+    ratlesnet_repo: ratlesnet_repo
+    pretrained_model: ratlesnet_pretrained
+    require_pretrained: true
+    epochs: 25
+    lr: 1e-5
+    loadMemory: 0
+
+  - name: an2023_direct_lr1e5
+    kind: an2023
+    input: lys_train
+    validation: lys_validation
+    model_path: an2023_model
+    require_pretrained: true
+    epochs: 15
+    lr: 1e-5
+    metrics_threshold: 0.8
+
+  - name: an2023_direct_lr5e6
+    kind: an2023
+    input: lys_train
+    validation: lys_validation
+    model_path: an2023_model
+    require_pretrained: true
+    epochs: 20
+    lr: 5e-6
+    metrics_threshold: 0.8
+
+  # Optional RatLesNetV2 loss-function probes. Enable after reviewing the
+  # direct CE+Dice baselines above.
+  - name: ratlesnet_direct_tversky_lr1e5
+    kind: ratlesnetv2
+    enabled: false
+    input: lys_train
+    validation: lys_validation
+    ratlesnet_repo: ratlesnet_repo
+    pretrained_model: ratlesnet_pretrained
+    require_pretrained: true
+    epochs: 20
+    lr: 1e-5
+    loadMemory: 0
+    loss: tversky
+    tversky_alpha: 0.3
+    tversky_beta: 0.7
+
+  - name: ratlesnet_direct_focal_tversky_lr1e5
+    kind: ratlesnetv2
+    enabled: false
+    input: lys_train
+    validation: lys_validation
+    ratlesnet_repo: ratlesnet_repo
+    pretrained_model: ratlesnet_pretrained
+    require_pretrained: true
+    epochs: 20
+    lr: 1e-5
+    loadMemory: 0
+    loss: focal-tversky
+    tversky_alpha: 0.3
+    tversky_beta: 0.7
+    focal_tversky_gamma: 0.75
+
+  - name: ratlesnet_direct_weighted_ce_dice_lr1e5
+    kind: ratlesnetv2
+    enabled: false
+    input: lys_train
+    validation: lys_validation
+    ratlesnet_repo: ratlesnet_repo
+    pretrained_model: ratlesnet_pretrained
+    require_pretrained: true
+    epochs: 20
+    lr: 1e-5
+    loadMemory: 0
+    loss: weighted-ce-dice
+    background_class_weight: 1.0
+    lesion_class_weight: 5.0
+
+  # Keep disabled until the direct LYS baselines are reviewed.
+  - name: ratlesnet_external_short_lr5e5
+    kind: ratlesnetv2
+    enabled: false
+    input: external_train
+    validation: lys_validation
+    ratlesnet_repo: ratlesnet_repo
+    pretrained_model: ratlesnet_pretrained
+    require_pretrained: true
+    epochs: 5
+    lr: 5e-5
+    loadMemory: 0
