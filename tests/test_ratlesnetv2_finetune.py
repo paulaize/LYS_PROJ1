@@ -12,6 +12,12 @@ import yaml
 from ratlesnetv2_finetune.commands import build_cloud_command_plan, format_command
 from ratlesnetv2_finetune.dataset import prepare_dataset
 from ratlesnetv2_finetune.roiset_to_nifti_mask import convert_roiset_to_nifti_mask
+from ratlesnetv2_finetune.scripts.finetune_an2023 import (
+    _an2023_normalize,
+    _center_crop_or_pad,
+    _find_cases,
+    _restore_crop_or_pad,
+)
 from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
     _parse_export_epochs,
     _parse_export_splits,
@@ -183,6 +189,42 @@ def test_nibabel_get_data_compat_patch_restores_upstream_loader_call():
     loaded = img.get_data()
     assert loaded.shape == (2, 3, 4)
     assert np.allclose(loaded, 1)
+
+
+def test_an2023_crop_pad_roundtrip_restores_source_grid():
+    source = np.zeros((8, 10, 3), dtype=np.uint8)
+    source[3:5, 4:7, 1] = 1
+
+    cropped, plan = _center_crop_or_pad(source, (6, 12, 5), fill=0)
+    restored = _restore_crop_or_pad(cropped, plan, fill=0)
+
+    assert cropped.shape == (6, 12, 5)
+    assert restored.shape == source.shape
+    assert np.array_equal(restored, source)
+
+
+def test_an2023_normalization_matches_notebook_scaling():
+    scan = np.array([0.0, 5.0, 10.0], dtype=np.float32).reshape((3, 1, 1))
+
+    normalized = _an2023_normalize(scan)
+
+    assert normalized[0, 0, 0] == pytest.approx(-1.0)
+    assert normalized[1, 0, 0] == pytest.approx(0.0)
+    assert normalized[2, 0, 0] == pytest.approx(1.0)
+
+
+def test_an2023_find_cases_uses_prepared_ratlesnet_layout(tmp_path):
+    case_dir = tmp_path / "train" / "LYS" / "5d" / "BD_01_5d"
+    case_dir.mkdir(parents=True)
+    _write_nifti(case_dir / "scan.nii.gz", np.ones((8, 9, 3), dtype=np.float32))
+    _write_nifti(case_dir / "scan_lesionIAM.nii.gz", np.zeros((8, 9, 3), dtype=np.uint8))
+
+    cases = _find_cases(tmp_path / "train")
+
+    assert len(cases) == 1
+    assert cases[0].case_id == "BD_01_5d"
+    assert cases[0].scan == case_dir / "scan.nii.gz"
+    assert cases[0].label == case_dir / "scan_lesionIAM.nii.gz"
 
 
 def test_prepare_dataset_rejects_spacing_mismatch(tmp_path):

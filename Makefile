@@ -4,7 +4,7 @@ IHC ?=
 RUN_ARGS ?=
 RATLESNET_CONFIG ?= ratlesnetv2_finetune/configs/dataset_template.yml
 
-.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-threshold-sweeps ratlesnetv2-roiset-to-mask ratlesnetv2-add-source ratlesnetv2-download-external ratlesnetv2-orient-external-lsp ratlesnetv2-flip-external-si ratlesnetv2-prepare-lys-roisets ratlesnetv2-review-lys-masks ratlesnetv2-prepare ratlesnetv2-split-prepared ratlesnetv2-cloud-plan run clean
+.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-threshold-sweeps ratlesnetv2-roiset-to-mask ratlesnetv2-add-source ratlesnetv2-download-external ratlesnetv2-orient-external-lsp ratlesnetv2-flip-external-si ratlesnetv2-prepare-lys-roisets ratlesnetv2-review-lys-masks ratlesnetv2-prepare ratlesnetv2-split-prepared ratlesnetv2-cloud-plan an2023-finetune run clean
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
@@ -56,6 +56,9 @@ ratlesnetv2-split-prepared:
 
 ratlesnetv2-cloud-plan:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.plan_cloud_run --config $(RATLESNET_CONFIG) $(RUN_ARGS)
+
+an2023-finetune:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.finetune_an2023 $(RUN_ARGS)
 
 # Run one animal:
 #   make run CONFIG=config/animals/BD_08_5D.yml RUN_ARGS=--no-mask-editor [IHC=work/BD_08_5D/ihc_A.csv]

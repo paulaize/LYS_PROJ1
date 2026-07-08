@@ -253,6 +253,93 @@ for name in [
         display(Image(filename=str(path)))
 ```
 
+## An et al. 2023 Quick Comparator
+
+An et al. 2023 released an inference notebook and TorchScript weights for
+mouse stroke lesion segmentation:
+
+- code/weights: <https://github.com/scalableminds/stroke-lesion-segmentation>
+- paper: <https://www.nature.com/articles/s41598-023-39826-8>
+
+The local wrapper `finetune_an2023.py` uses the same prepared split folders as
+RatLesNetV2. It fine-tunes the released `lesion_model.pt` directly and exports
+the same style of validation metrics, full-volume NIfTI predictions, and QC
+overlays. This is a quick transfer-learning comparator; do not use the LYS test
+split until the final strategy is selected.
+
+Kaggle setup after cloning `LYS_PROJ1`:
+
+```python
+%cd /kaggle/working
+!test -d stroke-lesion-segmentation || git clone --depth 1 https://github.com/scalableminds/stroke-lesion-segmentation.git
+%cd /kaggle/working/LYS_PROJ1
+!ls -lh /kaggle/working/stroke-lesion-segmentation/lesion_model.pt
+```
+
+Direct An-pretrained -> LYS fine-tuning:
+
+```python
+%cd /kaggle/working/LYS_PROJ1
+
+!python -m ratlesnetv2_finetune.scripts.finetune_an2023 \
+  --input /kaggle/working/LYS_T2w_manual_v0_split/train \
+  --validation /kaggle/working/LYS_T2w_manual_v0_split/validation \
+  --output /kaggle/working/an2023_runs_lys_direct \
+  --model-path /kaggle/working/stroke-lesion-segmentation/lesion_model.pt \
+  --require-pretrained \
+  --epochs 10 \
+  --lr 1e-5 \
+  --gpu 0 \
+  --save-every 1 \
+  --eval-every 1 \
+  --early-stop-patience 8 \
+  --lr-scheduler reduce-on-plateau \
+  --lr-scheduler-metric validation_dice \
+  --lr-plateau-patience 3 \
+  --lr-plateau-factor 0.5 \
+  --min-lr 1e-6 \
+  --metrics-threshold 0.8 \
+  --export-predictions validation \
+  --export-prediction-limit 8 \
+  --export-prediction-epochs all
+```
+
+Important differences from RatLesNetV2:
+
+- The released An repository is inference-oriented, so this wrapper fine-tunes
+  the TorchScript module rather than importing a full training package.
+- Preprocessing follows the notebook: scale each volume by its max to a
+  uint8-like `0..255` range, then apply `(x - 127.5) / 127.5`.
+- The model expects a fixed center crop/pad of `152 x 196 x 30` in model order.
+  LYS `256 x 256 x 18` scans are center-cropped in-plane and zero-padded in
+  slice depth; predictions are restored to the original NIfTI grid for export.
+- Best checkpoints are `.pt` TorchScript files:
+  `best_by_validation_dice.pt`, `best_by_validation_loss.pt`, `last.pt`, and
+  `an2023_finetuned.pt`.
+
+Inspect An metrics and overlays:
+
+```python
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+
+root = Path("/kaggle/working/an2023_runs_lys_direct")
+run = sorted([p for p in root.iterdir() if p.is_dir() and p.name.isdigit()],
+             key=lambda p: int(p.name))[-1]
+
+display(pd.read_csv(run / "metrics_epoch.csv").tail(10))
+
+for name in [
+    "latest_qc_overlay.png",
+    "validation_metric_curves.png",
+    "voxel_count_curves.png",
+]:
+    path = run / name
+    if path.exists():
+        display(Image(filename=str(path)))
+```
+
 ## Continue Direct LYS Baseline
 
 Continue from the best validation-Dice checkpoint, not the final epoch. Replace

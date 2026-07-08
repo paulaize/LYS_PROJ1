@@ -23,5 +23,6 @@ to `legacy/`.
 - [ratlesnetv2_external_datasets.md](ratlesnetv2_external_datasets.md) -
   public mouse dataset policy for RatLesNetV2 adaptation.
 
-The command-heavy RatLesNetV2 runbook lives at
+The command-heavy deep-learning runbook for RatLesNetV2 and the An et al. 2023
+quick comparator lives at
 [../ratlesnetv2_finetune/README.md](../ratlesnetv2_finetune/README.md).
