@@ -231,7 +231,8 @@ Stop where accuracy is good enough for the biology. For a 10-animal exploratory 
 
 ## 8. QC gates
 1. NIfTI header/spacing correct (0.07×0.07×0.5 mm).
-2. Channel map confirmed; Panel A NeuroTrace/FITC spectral overlap ruled out.
+2. Channel map confirmed; Panel A NeuroTrace/FITC spectral status documented
+   from panel provenance.
 3. N4 flattening visibly OK.
 4. Pretrained lesion model QC'd vs `3-5` corrected manual masks (Dice)
    **before** trusting it.

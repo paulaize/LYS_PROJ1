@@ -27,6 +27,22 @@ def _safe_float(value) -> float:
         return float("nan")
 
 
+def _optional_value(row, column: str, default: str = ""):
+    if column not in row:
+        return default
+    value = row.get(column, default)
+    if pd.isna(value):
+        return default
+    return value
+
+
+def _optional_float(row, column: str) -> float | str:
+    if column not in row:
+        return ""
+    value = _safe_float(row.get(column))
+    return value if pd.notna(value) else ""
+
+
 def ingest_qupath(csv_path: str | Path) -> list[dict]:
     """Parse a QuPath export CSV into tidy measurement rows (list of dicts)."""
     csv_path = Path(csv_path)
@@ -57,10 +73,22 @@ def ingest_qupath(csv_path: str | Path) -> list[dict]:
         dapi_density = (dapi_raw / total_mm2) if (total_mm2 > 0 and dapi_raw >= 0) else float("nan")
 
         base = {
+            "source_animal": _optional_value(r, "source_animal"),
+            "source_role": _optional_value(r, "source_role"),
             "image": r["image"],
             "panel": r["panel"],
+            "section_id": _optional_value(r, "section_id"),
             "region": r["region"],
             "area_mm2": total_mm2,
+            "tissue_annotation": _optional_value(r, "tissue_annotation"),
+            "tissue_qc": _optional_value(r, "tissue_qc"),
+            "artifact_annotation_names": _optional_value(r, "artifact_annotation_names"),
+            "artifact_annotation_count": _optional_value(r, "artifact_annotation_count"),
+            "artifact_excluded_area_um2": _optional_float(r, "artifact_excluded_area_um2"),
+            "igg_fitc_channel_index": _optional_value(r, "igg_fitc_channel_index"),
+            "igg_fitc_threshold": _optional_value(r, "igg_fitc_threshold"),
+            "threshold_status": _optional_value(r, "threshold_status"),
+            "downsample": _optional_value(r, "downsample"),
             "qc_flag": r.get("qc_flag", "v1_area_only"),
         }
         rows.append(

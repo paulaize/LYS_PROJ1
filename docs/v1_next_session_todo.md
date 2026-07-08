@@ -1,335 +1,385 @@
-# v1 next-session TODO
+# v1 Next-Session TODO
 
-Last audited: 2026-06-17
+Last cleaned: 2026-07-08
 
-This is the current execution checklist for the next programming session. It
-overrides the older "Immediate next actions" at the end of
-`docs/development_roadmap.md`. Keep v1 limited to one animal, no atlas, no DL,
-no compartments, and no batch processing.
+This is the short execution checklist for the next development session. The
+IHC strategy lives in `docs/IHC_v1_plan.md`. The full project roadmap lives in
+`docs/development_roadmap.md`.
 
-## Zero-context orientation
+Keep v1 limited to one animal, no atlas, no deep learning, no compartments, and
+no batch processing.
 
-- Current v1 animal: `BD_08_5D` (`5d`, stroke), configured in
-  `config/animals/BD_08_5D.yml`.
-- Current priority: finish the first end-to-end implementation, not improve the
-  MRI segmentation backend.
-- MRI truth policy: `lesion_draft.nii.gz` is an untrusted automatic seed. The
-  reviewed `lesion_corrected.nii.gz` is the source of truth for v1 lesion
-  volume and Swanson/indirect edema correction.
-- The current threshold draft can target bright peripheral MRI artifact instead
-  of the true image-right isocortical lesion. That is not a reason to add
-  atlas, DL, or an isocortex ROI heuristic during v1. If the draft is bad,
-  erase/redraw it by hand in the mask editor and keep the correction metadata.
-- IHC direction: the script performs the analysis. The human gate is review/sign
-  off of `tissue_v1` and threshold/calibration provenance, not hand analysis
-  done before scripting.
-- IHC threshold reality: no approved IgG-FITC positivity threshold exists yet,
-  and the team has not previously analyzed these images in QuPath. v1 must
-  create the first calibration/exploration workflow; do not expect Paul to
-  provide a pre-existing QuPath threshold.
-- IHC control reality: control animal `C6S5` has Panel A and Panel B `.vsi`
-  files under `data/C6S5/IHC/`. It has no MRI in v1 and is configured as an
-  IHC threshold/background control.
+## Current State
 
-## Current status
+Branch:
 
-- [x] Existing `lys-bbb` environment is usable on macOS arm64.
-- [x] Required and optional Python imports pass.
-- [x] QuPath 0.7.0, brkraw, and napari command-line checks pass.
-- [x] `make test` passes: 34 tests.
-- [x] MRI and IHC-ingest unit tests use synthetic data and pass.
-- [x] `make lint` passes.
-- [x] One real v1 animal is configured: `BD_08_5D`.
-- [x] Bruker Scan 2 / reco 1 T2 RARE was converted to
-  `work/BD_08_5D/mri/t2_scan2.nii.gz`.
-- [x] Converted T2 header spacing validates as `0.07 x 0.07 x 0.5 mm`.
-- [x] v1 MRI lesion side is explicit in config as `lesion_side: image_right`.
-- [x] Napari MRI mask editor display now uses 18-slice `(slice, y, x)` order
-  while saving masks back to the original NIfTI `(x, y, slice)` layout.
-- [x] First no-editor MRI technical run wrote draft/corrected masks and
-  `outputs/BD_08_5D/BD_08_5D_v1.csv`; QC is correctly flagged
-  `needs_human_review`.
-- [x] Current MRI threshold draft is known to be anatomically unreliable on
-  `BD_08_5D` because it can select bright image-right peripheral signal. Treat
-  it as a disposable seed; the human-corrected mask is the v1 output.
-- [x] IHC QuPath/Bio-Formats diagnostics work for one Panel A target section.
-- [x] First exploratory Panel A threshold sweep completed for
-  `BD_08_5D` section_01 and matching `C6S5` control section_01 at
-  `ihc.threshold_calibration.downsample=32.0`. Output:
-  `work/BD_08_5D/ihc_threshold_sweep_panel_A.csv`.
-- [ ] Git working tree is reviewed and clean. Recheck before editing; the
-  current setup changes are intentionally uncommitted.
-- [ ] One real v1 animal has completed the full reviewed MRI + IHC path.
+- Current branch: `ihc`.
+- MRI lesion-model finetuning is being developed separately on
+  `dl-ratlesnetv2-finetune`.
+- Keep IHC edits isolated from `ratlesnetv2_finetune/`, `src/mri/` model code,
+  and cloud-training artifacts unless Paul explicitly asks otherwise.
 
-## Immediate handoff for the next session
+Target data:
 
-Do not start by running the full panel. The next IHC goal is to turn the
-exploratory threshold machinery into a reviewable calibration workflow, then
-scale only to selected good sections.
+- v1 animal: `BD_08_5D`.
+- IHC control: `C6S5`, role `no_lys241_control`.
+- Panels: A and B.
+- Each configured `.vsi` has label, overview, then 8 section series
+  (`section_01..section_08`, Bio-Formats series `2..9`).
 
-1. Inspect the first smoke-test CSV:
-   `work/BD_08_5D/ihc_threshold_sweep_panel_A.csv`. It contains Panel A
-   section_01 target/control threshold percentages and is explicitly not final.
-2. Add a visual threshold-review artifact, preferably exported overlay or PNG
-   thumbnails for the candidate thresholds, so Paul can approve/reject a
-   threshold using images rather than CSV values alone.
-3. Run the same one-section smoke test for Panel B target and C6S5 control.
-   Use `ihc-diagnose` first, then `ihc-threshold-sweeps`; keep
-   `--section section_01 --limit 1` until it succeeds.
-4. Add section QC/selection: record the best sections in
-   `selected_section_ids` or bad sections in `excluded_section_ids` before any
-   multi-section export.
-5. Add the threshold sign-off record: panel/batch scope, threshold value,
-   reviewer, date, target/control images used, and `approved` vs exploratory.
-6. Only after those gates, run deterministic IHC exports for the selected
-   sections and join them with the reviewed MRI row into the v1 CSV.
+Implemented:
 
-## Facts Paul must provide
+- `make ihc-diagnose`
+- `make ihc-section-qc`
+- `make calibrate-ihc`
+- `make ihc-threshold-sweeps`
+- `make ihc-threshold-review`
+- QuPath exporters for threshold sweep, threshold review thumbnails, tissue ROI
+  draft, and final tissue-only measurement export.
+- Python ingestion of QuPath CSVs.
 
-Do not guess these values in code or config.
+Generated:
 
-- [x] Choose the one v1 test animal: `BD_08_5D` (`5d`, stroke), with MRI and
-  Panel A/B IHC data present.
-- [x] Record the T2 RARE Scan 2 NIfTI path and confirm the brkraw output name:
-  `work/BD_08_5D/mri/t2_scan2.nii.gz`.
-- [x] Record the available top-level `.vsi` paths for Panel A and Panel B in
-  `config/animals/BD_08_5D.yml`.
-- [x] Confirm how QuPath/Bio-Formats exposes the 8 sections/series inside each
-  `.vsi`: each file has 10 images/series: label, whole-slide overview, then 8
-  section series. v1 should process section series only, with later manual
-  selection/QC for tears and folds.
-- [x] Confirm the exact zero-based channel map and IgG-FITC channel index for
-  each panel in QuPath/Bio-Formats.
-- [x] Identify the NeuroTrace product/emission for v1: accepted as
-  `NeuroTrace 640/660 Deep-Red Fluorescent Nissl Stain` (Paul, 2026-06-17).
-  Panel A FITC spectral bleed-through is not flagged for v1. Paul may still do
-  a later full fluorochrome audit.
-- [x] Resolve what the anti-IgG-FITC reagent binds and whether it detects
-  endogenous mouse IgG: confirmed anti-human IgG secondary, specific to
-  humanized LYS241, not endogenous mouse IgG (Paul, 2026-06-17).
-- [ ] Build, tune, and approve the first IgG-FITC positive threshold for each
-  panel or acquisition batch using negative and positive controls. No prior
-  QuPath threshold exists for these images. Specificity and positivity
-  threshold are orthogonal; anti-human specificity does not unblock
-  thresholding.
-- [x] Record the v1 lesion side convention: lesion is expected on image-right
-  in the MRI viewer. For the current Bruker T2 NIfTI orientation this maps to
-  the higher-index half of array axis 0 as displayed in Fiji and is encoded as
-  `image_right`.
-- [ ] Draw/review an authoritative MRI lesion mask. Tuning MRI threshold `k` is
-  optional/later; `k: 2.5` is only a provisional technical seed and is not a v1
-  scientific gate if the corrected human mask is used.
-- [x] Confirm napari as the initial v1 MRI mask editor. Keep the interface open
-  to later switch to ITK-SNAP / 3D Slicer, and keep 3D Slicer + MONAI Label in
-  mind for a later improved annotation workflow.
-- [x] Confirm napari editing workflow: the draft lesion is a labels layer edited
-  by paint/erase, not a movable shape. Closing napari saves the corrected mask.
+- Panel A `section_01` target/control threshold sweep CSV.
+- Panel A `section_01` target/control review PNGs under
+  `work/BD_08_5D/ihc_threshold_review/panel_A/`.
+- Section-QC manifest:
+  `work/BD_08_5D/ihc_section_qc_manifest.csv`.
+- Section-QC thumbnails:
+  `work/BD_08_5D/ihc_section_qc/`.
+- The manifest has 32 rows: target/control x Panel A/B x 8 configured
+  sections. There are 25 thumbnails because C6S5 Panel B sections 02-08 fail
+  before thumbnail export.
+- Usable sections are now recorded per panel in config:
+  - BD_08_5D Panel A: `section_01`, `section_03`, `section_06`
+  - C6S5 Panel A: `section_05`, `section_06`, `section_07`
+  - BD_08_5D Panel B: `section_05`, `section_06`, `section_08`
+  - C6S5 Panel B: unavailable/corrupted, excluded from threshold calibration
 
-## Next programming session
+Important caveat:
 
-Complete these in order.
+- The C6S5 Panel A `section_01` control image is visibly damaged. Treat those
+  outputs as smoke-test artifacts only, not calibration evidence.
+- Section QC exposed likely series/config problems:
+  - BD_08_5D Panel A `section_08` opens as a macro image with invalid pixel
+    calibration and only 3 channels instead of the configured 4.
+  - BD_08_5D Panel B `section_04` and `section_07` opened with only one
+    readable channel instead of the configured 4. Paul confirmed these images
+    were not saved properly, so they are excluded.
+  - C6S5 Panel B `section_01` produced a macro-sized 600 x 207, 3-channel
+    thumbnail.
+  - C6S5 Panel B `section_02..section_08` failed to open through the configured
+    Bio-Formats series indices. Paul confirmed the Panel B control file is
+    corrupted/unavailable for now.
 
-### P0: remove guessed configuration
+## Confirmed Rules
 
-- [x] Restore unresolved channel maps and channel indexes in
-  `config/animals/TEMPLATE.yml` to `null`.
-- [x] Remove the unconfirmed global `default_igg_fitc_channel_index` from
-  `config/pipeline.yml`, or keep it `null` and fail helpfully when unset.
-- [x] Keep global IgG-FITC threshold `null` until it has been approved.
-- [x] Add validation tests proving unresolved channel indexes and thresholds
-  cannot silently run.
-
-### P0: make the v1 IHC export scientifically usable
-
-The current exporter now requires `tissue_v1` and measures inside that
-annotation. The generated `tissue_v1` is rough and must be reviewed/corrected
-in QuPath before final measurements are trusted.
-
-- [x] Confirm whether the configured Panel A/B `.vsi` files contain all
-  section series and decide the exact QuPath export iteration unit.
-- [x] Standardize the v1 tissue ROI name. The script should perform the tissue
-  analysis/export; `tissue_v1` is the review/sign-off gate for the ROI used by
-  the script, not hand analysis performed before scripting.
-  Annotation name: `tissue_v1`.
-- [x] Update `detect_cells.groovy` to create a rough signal-derived
-  `tissue_v1` annotation that Paul can correct/review in QuPath.
-- [x] Update `export_measurements.groovy` to require and measure only the
-  reviewed tissue annotation, excluding off-tissue background.
-- [x] Calculate `total_area_um2` from the measured tissue ROI, not the full
-  image rectangle.
-- [ ] Fail helpfully when the tissue annotation, pixel calibration, confirmed
-  channel index, or approved final threshold is missing. Exploratory threshold
-  runs are allowed only when clearly marked as calibration/not final.
-- [x] Decide duplicate-row behavior: overwrite combined CSV for v1.
-- [ ] Prevent duplicate rows when a section is re-exported, or make overwrite
-  behavior explicit and deterministic.
-- [ ] Record the image/section identifier, panel, channel index, threshold,
-  downsample, and QC status in the QuPath export.
-- [ ] Test the revised exporter on one Panel A and one Panel B section before
-  processing all sections.
-- [ ] Add section-selection review: process only the best few sections for v1,
-  with `selected_section_ids` / `excluded_section_ids` recorded in config.
-  If multiple good sections are selected, quantify each and aggregate later;
-  do not silently choose one section without QC provenance.
-
-### P0: connect config, QuPath, and final provenance
-
-- [ ] Add a small QuPath orchestration command/script that reads one animal
-  YAML and runs all configured Panel A and Panel B sections with their confirmed
-  indexes and thresholds. It must skip label/overview series and iterate only
-  section series `2..9` for `BD_08_5D`.
-- [ ] Write one deterministic combined IHC CSV under `work/<animal_id>/`.
-- [x] Carry resolved anti-IgG specificity facts into v1 output provenance:
-  `anti_igg_specificity_resolved=true`, `fitc_specific_to_lys241=true`,
-  `fitc_igg_specificity=anti_human_confirmed`, and source
-  `confirmed_anti_human_IgG (Paul, 2026-06-17)`.
-- [x] Carry panel-specific `fitc_spectral_bleedthrough` into the v1 output
+- Do not assume Panel A and Panel B sections are matched.
+- Do not do cross-panel colocalization in v1.
+- Do not estimate whole-lesion histology volume: section thickness is `10 um`,
+  but inter-section spacing/z-position is unknown.
+- Treat IHC image-right ipsilateral for `BD_08_5D` as pending visual
+  orientation QC until overlays label ipsi, contra, and midline.
+- Do not use unreviewed `tissue_v1` as final denominator.
+- Do not approve an IgG-FITC threshold from CSV values alone.
+- Keep the measured marker name `IgG-FITC`; LYS241 interpretation lives in
   provenance.
-- [ ] Ensure unresolved spectral bleed-through and thresholds produce clear QC
-  flags rather than being treated as resolved. Do not add a QC warning for the
-  now-resolved anti-human specificity fact.
-- [x] Add tests for the new provenance and config-validation behavior.
-- [x] Add `make calibrate-ihc` / `src/ihc/calibrate.py` as a fail-loud
-  placeholder that documents specificity vs threshold as orthogonal.
-- [ ] Add threshold-calibration workflow or helper using vehicle/control images;
-  do not hardcode a provisional analysis threshold as final data. This helper
-  is how v1 should create the first threshold candidates because there is no
-  prior QuPath threshold to reuse. A no-LYS241 / vehicle / secondary-only
-  control should provide clean background for background mean + k*SD
-  calibration because the secondary is anti-human, but control paths must still
-  come from config.
-- [x] Configure control animal `C6S5` for IHC threshold calibration. MRI is not
-  required for this control in v1.
-- [x] Add `export_threshold_sweep.groovy` so the first review output can be a
-  CSV sweep of candidate IgG-FITC thresholds inside `tissue_v1`.
-- [x] Add `make ihc-threshold-sweeps`, a Python/QuPath runner that can loop
-  BD_08_5D and C6S5 across configured section series for exploratory threshold
-  sweeps. Default is dry-run. First real execution should be one section only:
-  `RUN_ARGS="--panel A --section section_01 --target-only --limit 1 --run"`.
-- [x] Add `make ihc-diagnose`, a metadata-only QuPath/Bio-Formats opener for
-  one configured section. Run this before a real sweep to separate slow `.vsi`
-  series opening from slow pixel reads.
-- [ ] Resolve the current direct-CLI QuPath performance gate. Paul observed
-  that `RUN_ARGS="--panel A --run"` was too slow and had to be interrupted;
-  one-section diagnostics should decide whether v1 should continue with direct
-  `--image/--server` calls or switch to a QuPath project/cached-import path.
-  Status: direct CLI is usable for a single section at
-  `ihc.threshold_calibration.downsample=32.0`; Panel A section_01 target and
-  C6S5 control sweeps completed and wrote
-  `work/BD_08_5D/ihc_threshold_sweep_panel_A.csv`. Whole-panel execution is
-  still intentionally not validated and should wait until selected/best
-  sections are chosen.
-- [ ] Decide how to review threshold-sweep outputs visually. The current CSV
-  gives target/control percentages by threshold, but final v1 threshold approval
-  still needs either QuPath overlays, exported thumbnails, or another clear
-  review artifact attached to the approval record.
-- [x] Replace the fail-loud calibration placeholder with
-  `ihc_threshold_calibration_manifest.csv`, an exploratory manifest listing
-  panels, target/control files, candidate thresholds, and review status.
-- [ ] Add a review/sign-off record for the chosen IHC threshold: reviewer,
-  date, control/source images, threshold value, panel/batch scope, and whether
-  the result is exploratory or approved.
+- C6S5 is a no-LYS241/background control, not a full spectral-unmixing control.
+- QuPath handles `.vsi` IO/review/export; Python handles orchestration,
+  validation, provenance, and joins.
 
-### P1: validate the MRI path on the real test animal
+## Next Work, In Order
 
-- [x] Create `config/animals/BD_08_5D.yml` from the cleaned template.
-- [x] Add a configured Bruker-to-NIfTI conversion command:
-  `make convert-mri CONFIG=config/animals/BD_08_5D.yml`.
-- [x] Confirm header spacing is `0.07 x 0.07 x 0.5 mm`.
-- [x] Configure segmentation to use the known image-right lesion side instead
-  of inferring side from hyperintensity.
-- [x] Fix napari editor display: NIfTI data is `(x, y, slice)`, but napari
-  review uses `(slice, y, x)` so the user sees 18 non-sideways slices. The
-  edited labels are transformed back before saving.
-- [x] Run a first no-editor technical MRI pass:
-  `make run CONFIG=config/animals/BD_08_5D.yml RUN_ARGS=--no-mask-editor`.
-- [ ] Visually inspect the N4-corrected volume and generated brain mask.
-- [ ] Review/edit `work/BD_08_5D/lesion_corrected.nii.gz` with the chosen mask
-  editor; replace the technical fallback with a documented human-corrected
-  mask.
-- [ ] If the draft is badly wrong, clear/redraw it rather than trying to rescue
-  the threshold seed. Preserve the corrected human mask.
-- [ ] Confirm the CSV records the reviewed mask as `reviewed_edited` or
-  `reviewed_no_changes`, never `needs_human_review`.
-- [ ] Later, after v1 is running, optionally run candidate `k` values against
-  the reference human mask. Do not let this block the first implementation.
-- [ ] Confirm raw and Swanson-corrected lesion volumes are plausible. The
-  current no-editor technical run produced raw `2.171 mm3` and
-  Swanson-corrected `2.115 mm3`, but these are not final until mask review.
-- [x] Confirm technical MRI rows carry reviewer, edit Dice, and QC status.
-- [ ] Confirm reviewed final MRI rows carry reviewer, edit Dice, and QC status.
+### 1. Keep Section QC As Provenance
 
-### P2: MRI model-preparation notes, not v1 blockers
+Section QC has been reviewed enough to select v1 working sections. Keep the
+manifest and thumbnails as provenance. Regenerate only if the section mapping or
+source files change.
 
-- [ ] Collect corrected 3D lesion masks as future model reference data. One
-  mask is enough to test the v1 pipeline mechanically.
-- [ ] With `3-5` corrected stroke masks, test a pretrained mouse T2 lesion model
-  or the current threshold backend honestly by Dice/edit burden.
-- [ ] With `8-12` corrected stroke masks, consider a small transfer-learning or
-  nnU-Net fine-tuning attempt if the pretrained model is close.
-- [ ] With `15-25` corrected masks, fine-tuning becomes much more defensible.
-  Training from scratch would need substantially more data and is not the
-  current plan.
+Output one low-resolution review thumbnail and one manifest row per section:
 
-### P1: repository cleanup
-
-- [x] Fix current Ruff errors and trailing whitespace without unrelated
-  refactors.
-- [x] Reconcile the README with the actual repository layout; `.codex/` is not
-  required in this checkout.
-- [ ] Add a tiny real NIfTI/header fixture only if it can be safely
-  de-identified and kept small.
-- [ ] Review existing uncommitted changes, then commit the intended setup and
-  v1 fixes.
-
-## Validation sequence
-
-After every code change:
-
-```bash
-make test
+```text
+animal_id, source_role, panel, section_id, series_index,
+channels, expected_channels, thumbnail_path,
+section_qc_status, section_qc_notes,
+selected_for_threshold_calibration, selected_for_final_export, qc_flag
 ```
 
-`make test` disables external pytest plugin autoloading; direct pytest currently
-tries to import napari's pytest plugin in this environment.
-
-Before calling v1 complete:
+Suggested command shape:
 
 ```bash
-make env-check
+make ihc-section-qc CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --run --keep-going"
+```
+
+Output paths:
+
+```text
+work/BD_08_5D/ihc_section_qc_manifest.csv
+work/BD_08_5D/ihc_section_qc/panel_<panel>/<animal>_<role>/<section>/section_qc_composite.png
+```
+
+Manual review should identify folds, holes, tears, missing tissue, saturation,
+bad focus, severe background, macro/overview images, failed series, and wrong
+channel counts. The current selected/excluded sections are recorded under each
+panel's `section_selection` block.
+If a configured series cannot be opened, the command should record
+`section_qc_status=failed_qupath_open`; treat that section as excluded until
+the series layout is corrected.
+
+### 2. Accept Panel B Control Unavailable For v1
+
+For now, do not block development on C6S5 Panel B. It is marked
+`control_status: corrupted_unavailable` and
+`exclude_from_threshold_calibration: true`.
+
+Panel B target processing may continue, but Panel B IgG-FITC positive-area
+outputs must be flagged as exploratory/no Panel B control until a valid control
+or approved fallback threshold rule exists.
+
+### 3. Run Panel A Calibration On Selected Sections
+
+Panel A is now the clean control-calibrated path:
+
+```bash
+make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --run"
+make ihc-threshold-review CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --run"
+```
+
+Dry-run check already schedules:
+
+```text
+BD_08_5D Panel A: section_01, section_03, section_06
+C6S5 Panel A: section_05, section_06, section_07
+```
+
+### 4. Add Artifact Exclusion Annotations
+
+The Panel A threshold review showed that folds can be marked as IgG-FITC
+positive. Do not solve this only by raising the threshold. In QuPath, add
+annotations named `artifact_exclude` for folds, tears, holes, saturated edges,
+and debris that should not contribute to measurement.
+
+The sweep, review-thumbnail, and final measurement exporters now subtract
+`artifact_exclude` from `tissue_v1` and record:
+
+```text
+artifact_annotation_count, tissue_area_um2, artifact_excluded_area_um2
+```
+
+If no artifact annotations exist, rows are flagged
+`no_artifact_exclusion_annotations`.
+
+The current direct `.vsi` commands do not load saved QuPath annotations. For
+reviewed `tissue_v1` and `artifact_exclude`, create/use a QuPath project and
+run scripts with:
+
+```bash
+QuPath script --project "<project.qpproj>" --image "<project image name>" ...
+```
+
+After adding artifact annotations, rerun review/sweeps for the affected
+sections before threshold sign-off.
+
+### 5. Build Manual Threshold Dashboard
+
+Generate the manual review dashboard:
+
+```bash
+make ihc-threshold-dashboard CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A"
+```
+
+It writes:
+
+```text
+work/BD_08_5D/ihc_manual_review/panel_A_threshold_review.html
+work/BD_08_5D/ihc_manual_review/panel_A_threshold_signoff_template.json
+```
+
+The dashboard shows all section-QC thumbnails, pre-checks the configured
+selected sections, summarizes the target/control threshold table, and only
+prompts for thresholds that pass simple plausibility criteria:
+
+```text
+control mean <= 1%
+target mean >= 0.05%
+target/control fold >= 5
+```
+
+For the current direct-image Panel A sweep, this proposes `250` and `500`.
+Use the page to download a manual decision JSON after reviewing thumbnails.
+
+### 6. Run Panel B Target-Only Exploratory Sweeps
+
+Panel B has no usable configured control for now:
+
+```bash
+make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel B --run"
+make ihc-threshold-review CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel B --run"
+```
+
+Dry-run check already schedules only:
+
+```text
+BD_08_5D Panel B: section_05, section_06, section_08
+```
+
+These outputs are useful for development and review, but not final
+control-calibrated Panel B IgG-FITC claims.
+
+### 7. Add Threshold Sign-Off
+
+After the dashboard decision JSON is downloaded, store it as:
+
+```text
+work/BD_08_5D/ihc_manual_review/panel_A_threshold_review_decision.json
+```
+
+Then validate and approve it:
+
+```bash
+make ihc-threshold-signoff CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --decision work/BD_08_5D/ihc_manual_review/panel_A_threshold_review_decision.json"
+```
+
+The sign-off command refuses:
+
+- unapproved decisions,
+- thresholds outside dashboard candidates,
+- thresholds no longer plausible under the current sweep CSV,
+- animal/panel mismatches,
+- missing reviewer/date/notes,
+- missing target or control sections.
+
+It writes:
+
+```text
+work/BD_08_5D/ihc_threshold_signoff_panel_A.json
+work/BD_08_5D/ihc_threshold_signoff_panel_A.csv
+```
+
+Required fields:
+
+```text
+animal_id, panel, threshold_scope, igg_fitc_threshold,
+reviewer, review_date, approved,
+target_sections_used, control_sections_used, control_type, notes
+```
+
+Final exports must require an approved threshold, or else write rows clearly
+flagged as exploratory/not final.
+
+### 8. Finalize Tissue ROI Gate
+
+Before final measurement export:
+
+- `tissue_v1` exists.
+- `tissue_v1` was reviewed/corrected in QuPath.
+- `artifact_exclude` annotations have been added where folds/tears/debris
+  would otherwise inflate IgG-FITC area.
+- Pixel calibration is valid.
+- IgG-FITC channel index is confirmed.
+- Threshold is approved.
+
+Failures should be helpful and explicit.
+
+### 9. Make Final Export Deterministic
+
+Initial deterministic export wiring is in place:
+
+```bash
+make ihc-quantify CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --threshold 250 --exploratory --tissue-mode auto_if_missing --run"
+```
+
+This writes a raw QuPath measurement CSV and a tidy Python CSV under
+`work/BD_08_5D/`. Re-running overwrites by default unless `--append` is passed.
+Exploratory direct-VSI rows are clearly flagged as not final.
+
+For final exports, ensure re-exporting a section does not silently duplicate
+rows. Either overwrite combined CSVs for v1 or deduplicate by:
+
+```text
+animal_id, panel, section_id, image, region, measure
+```
+
+Also ensure final exports carry:
+
+```text
+image, section_id, panel, channel_index, threshold, downsample,
+tissue_qc_status, section_qc_status, threshold_status, qc_flag
+```
+
+### 10. Produce The First Final IHC CSV
+
+Current immediate path:
+
+- Run first-draft Panel A quantification with the threshold chosen from the
+  dashboard.
+- Inspect the tidy CSV and raw overlays/sections in parallel.
+- Add/review `tissue_v1` and `artifact_exclude` in QuPath for selected sections.
+
+After selected sections, reviewed `tissue_v1`, project annotations, and
+threshold sign-off:
+
+- Export one selected Panel A section.
+- Export one selected Panel B section.
+- Ingest both into Python.
+- Write one deterministic combined IHC CSV under `work/BD_08_5D/`.
+
+Remaining integration item: make the Python quantification runner address
+QuPath project image names directly, so reviewed `tissue_v1`/`artifact_exclude`
+annotations are loaded automatically instead of relying on direct `.vsi`
+exploratory mode.
+
+### 11. Join With MRI At Animal Level
+
+For v1, join only at animal level:
+
+```text
+animal_id, timepoint, panel, modality, measure, value, unit,
+area_mm2, n_cells, edited, edit_dice, reviewer, qc_flag, model_version
+```
+
+Do not perform section-to-MRI-slice joins or Panel A/B section joins until
+section matching/z-position is confirmed.
+
+## MRI Parallel Track
+
+MRI work may continue on `dl-ratlesnetv2-finetune`, but v1 still requires a
+reviewed human lesion mask before the joined CSV is considered scientific.
+
+The automatic MRI lesion draft is not final output. The reviewed
+`lesion_corrected.nii.gz` is the source of truth for v1 volume and edema
+correction.
+
+## Validation Commands
+
+After documentation-only edits:
+
+```bash
 make test
 make lint
-make convert-mri CONFIG=config/animals/BD_08_5D.yml
-make run CONFIG=config/animals/BD_08_5D.yml IHC=work/BD_08_5D/ihc.csv
 ```
 
-Inspect manually:
+After IHC code edits:
 
-- `work/BD_08_5D/lesion_draft.nii.gz`
-- `work/BD_08_5D/lesion_corrected.nii.gz`
-- revised tissue-only QuPath measurements
-- `outputs/BD_08_5D/BD_08_5D_v1.csv`
+```bash
+make test
+make lint
+make ihc-diagnose CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --target-only --limit 1"
+```
 
-MRI mask-review notes:
+Real QuPath runs may need unsandboxed execution on macOS.
 
-- Run `make run CONFIG=config/animals/BD_08_5D.yml` to open napari.
-- Select the `lesion (edit me)` labels layer and use paint/erase; the mask is
-  not a movable shape.
-- Closing napari saves `work/BD_08_5D/lesion_corrected.nii.gz` and rewrites the
-  CSV with `reviewed_edited` or `reviewed_no_changes`.
-- `RUN_ARGS=--no-mask-editor` is for technical runs only and overwrites the
-  corrected mask with a draft flagged `needs_human_review`.
+## v1 Completion Gate
 
-## v1 completion gate
+v1 is complete when:
 
-- [ ] No channel, threshold, path, specificity, or overlap fact was guessed.
-- [ ] IHC thresholds were produced by the documented calibration workflow and
-  explicitly approved; no pre-existing QuPath threshold was assumed.
-- [ ] MRI header spacing and anisotropic volume calculation were verified.
-- [ ] MRI lesion mask received documented human review/correction, and the
-  unreviewed draft was not used as final data.
-- [ ] IHC positive area uses reviewed tissue area as its denominator.
-- [ ] Re-running IHC export does not silently duplicate measurements.
-- [ ] Interpretation flags and QC provenance survive into deliverables.
-- [ ] One configured animal produces a reviewed joined CSV.
-- [ ] `make test` and `make lint` pass.
+- No channel, threshold, path, section-matching, spacing, or control fact was
+  guessed.
+- Usable IHC sections are selected with QC provenance.
+- IgG-FITC threshold is calibrated from selected target/control sections and
+  approved.
+- `tissue_v1` is reviewed before final measurement.
+- Final IHC export is deterministic and duplicate-safe.
+- MRI lesion mask has documented human review.
+- One command produces a reviewed animal-level CSV joining MRI and IHC.
+- `make test` and `make lint` pass.

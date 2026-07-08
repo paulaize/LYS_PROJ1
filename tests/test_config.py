@@ -82,6 +82,20 @@ def test_real_v1_animal_splits_panel_spectral_bleedthrough():
     assert cfg.panel_config("B")["fitc_spectral_bleedthrough"] == "none"
 
 
+def test_real_v1_animal_records_panel_specific_section_selection():
+    cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
+    assert cfg.panel_config("A")["section_selection"]["selected_section_ids"] == [
+        "section_01",
+        "section_03",
+        "section_06",
+    ]
+    assert cfg.panel_config("B")["section_selection"]["selected_section_ids"] == [
+        "section_05",
+        "section_06",
+        "section_08",
+    ]
+
+
 def test_control_animal_config_records_ihc_without_mri():
     cfg = load_config("config/animals/C6S5.yml", repo_root=REPO)
     assert cfg.animal_id == "C6S5"
@@ -93,10 +107,29 @@ def test_control_animal_config_records_ihc_without_mri():
             cfg.panel_igg_fitc_threshold(panel)
 
 
+def test_control_config_records_panel_a_selection_and_panel_b_unavailable():
+    cfg = load_config("config/animals/C6S5.yml", repo_root=REPO)
+    assert cfg.panel_config("A")["section_selection"]["selected_section_ids"] == [
+        "section_05",
+        "section_06",
+        "section_07",
+    ]
+    assert cfg.panel_config("B")["control_status"] == "corrupted_unavailable"
+    assert cfg.panel_config("B")["exclude_from_threshold_calibration"] is True
+    assert cfg.panel_config("B")["section_selection"]["selected_section_ids"] == []
+
+
 def test_real_v1_animal_records_qupath_series_layout():
     cfg = load_config("config/animals/BD_08_5D.yml", repo_root=REPO)
+    ihc = cfg.animal["ihc"]
+    assert ihc["section_thickness_um"] == 10
+    assert ihc["section_spacing_um"] is None
+    assert ihc["panel_section_matching"] == "unconfirmed_do_not_match_by_section_id"
+    assert ihc["ipsilateral_side_in_image"] == "right"
+    assert ihc["orientation_qc_status"] == "pending_visual_qc"
     qupath = cfg.animal["ihc"]["qupath"]
     assert qupath["tissue_annotation_name"] == "tissue_v1"
+    assert qupath["artifact_exclusion_annotation_names"] == ["artifact_exclude"]
     assert qupath["combined_csv_mode"] == "overwrite"
     assert qupath["label_series_index"] == 0
     assert qupath["overview_series_index"] == 1
@@ -111,3 +144,14 @@ def test_real_v1_animal_records_qupath_series_layout():
         "section_06",
         "section_05",
     ]
+
+
+def test_control_config_records_section_metadata_without_lesion_side():
+    cfg = load_config("config/animals/C6S5.yml", repo_root=REPO)
+    ihc = cfg.animal["ihc"]
+    assert ihc["section_thickness_um"] == 10
+    assert ihc["section_spacing_um"] is None
+    assert ihc["panel_section_matching"] == "unconfirmed_do_not_match_by_section_id"
+    assert ihc["ipsilateral_side_in_image"] is None
+    assert ihc["orientation_qc_status"] == "not_applicable_control"
+    assert ihc["qupath"]["artifact_exclusion_annotation_names"] == ["artifact_exclude"]

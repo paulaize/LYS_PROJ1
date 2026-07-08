@@ -76,6 +76,13 @@ ihc:
       are not final thresholds; final panel/batch thresholds require review and
       sign-off using control images.
 
+  section_qc:
+    max_thumbnail_px: 1400
+    notes: >
+      Low-resolution composite thumbnails for manual section selection before
+      threshold calibration or final export. These images are review artifacts,
+      not quantitative measurements.
+
 compartments:
   # Milestone 4, unused in v1.
   peri_ring_mm: null

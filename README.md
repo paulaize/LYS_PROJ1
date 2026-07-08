@@ -109,116 +109,70 @@ Do not run `RUN_ARGS=--no-mask-editor` after making a manual correction unless
 you intentionally want to overwrite `lesion_corrected.nii.gz` with the
 unreviewed draft again.
 
-## QuPath v1 export
+## IHC v1
 
-v1 Groovy scripts do **not** assume channel order. Pass the IgG-FITC channel
-index from the animal YAML/config.
+The active IHC plan is [`docs/IHC_v1_plan.md`](docs/IHC_v1_plan.md). The exact
+next checklist is [`docs/v1_next_session_todo.md`](docs/v1_next_session_todo.md).
 
-There is currently **no approved IgG-FITC positivity threshold** for these IHC
-images. This is the first quantitative analysis of the slides, and the team
-does not have an existing QuPath threshold to reuse. The pipeline should create
-candidate thresholds from configured controls/image statistics, write review
-outputs, and require human sign-off before final positive-area measurements are
-accepted. QuPath is the viewer/export engine here; it is not assumed to provide
-a scientifically valid threshold automatically.
+Current v1 IHC rule set:
 
-The current control animal for threshold/background calibration is `C6S5`:
+- QuPath handles `.vsi` IO, review surfaces, overlays, and measurement export.
+- Python handles config, orchestration, CSV ingestion, provenance, and joins.
+- Panel A and Panel B are not assumed to be section-matched.
+- `C6S5` is a no-LYS241/background control, not a complete spectral correction
+  control.
+- No IgG-FITC positivity threshold is approved yet.
+- Final measurements require selected good sections, reviewed `tissue_v1`, and
+  threshold sign-off.
+- Folds/tears/debris should be annotated in QuPath as `artifact_exclude`; final
+  measurements use `tissue_v1 - artifact_exclude`.
+- Direct `--image <file.vsi>` QuPath commands are exploratory and do not load
+  saved project annotations. Reviewed final runs need a QuPath project
+  (`--project <project.qpproj>`).
 
-- Panel A: `data/C6S5/IHC/panel_A/BD_08_C6S5 C-_01.vsi`
-- Panel B: `data/C6S5/IHC/panel_B/BD_08_C6S5 C- IBA1 GFAP IgG_01.vsi`
-
-Create the first threshold-calibration manifest:
+Useful current commands:
 
 ```bash
 make calibrate-ihc CONFIG=config/animals/BD_08_5D.yml
-```
-
-This writes `work/BD_08_5D/ihc_threshold_calibration_manifest.csv`. It is a
-review plan, not an approved threshold.
-
-Generate all exploratory threshold-sweep QuPath commands without running them:
-
-```bash
-make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml
-```
-
-Run only Panel A commands:
-
-```bash
+make ihc-diagnose CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --target-only --limit 1"
+make ihc-section-qc CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--keep-going"
 make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A"
+make ihc-threshold-review CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A"
+make ihc-threshold-dashboard CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A"
+make ihc-threshold-signoff CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --decision work/BD_08_5D/ihc_manual_review/panel_A_threshold_review_decision.json"
+make ihc-quantify CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --threshold 250 --exploratory --tissue-mode auto_if_missing"
+make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel B"
 ```
 
-Before running a real threshold sweep, diagnose one configured section. This
-opens the `.vsi` series and writes metadata only; it does not read image pixels
-or compute thresholds.
+Real QuPath runs add `--run` inside `RUN_ARGS`; on macOS they may need
+unsandboxed execution.
 
-```bash
-make ihc-diagnose CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --target-only --limit 1 --run --timeout-seconds 180"
-```
+The `ihc-quantify` example above is a first-draft direct-VSI export. It writes
+rows flagged as exploratory because it uses rough auto tissue and cannot see
+saved QuPath project annotations. Reviewed/final exports should use an approved
+threshold sign-off and `tissue_mode=require_reviewed`.
 
-If this times out, the bottleneck is direct QuPath/Bio-Formats opening of the
-`.vsi` series and the next step is to move through a QuPath project/cached
-import path rather than repeated direct CLI image opens.
+Selected sections are recorded per panel in the animal configs. Panel A uses
+BD_08_5D sections `01`, `03`, `06` and C6S5 control sections `05`, `06`, `07`.
+Panel B currently runs BD_08_5D sections `05`, `06`, `08` only because the
+C6S5 Panel B control file is corrupted/unavailable; Panel B IgG-FITC outputs
+remain exploratory until a valid control or approved fallback threshold exists.
 
-If diagnostics succeeds, execute one threshold-sweep test command:
-
-```bash
-make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --target-only --limit 1 --run --timeout-seconds 600"
-```
-
-If that succeeds, run the matching C6S5 control section:
-
-```bash
-make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --controls-only --limit 1 --run --append"
-```
-
-Only after the target/control one-section smoke test succeeds and the best
-sections have been selected should you scale up. Do not use the old
-`downsample=8.0` command for exploratory sweeps; the v1 config uses
-`ihc.threshold_calibration.downsample=32.0` for this first pass.
-
-Then scale up to the chosen sections, or to the whole panel if needed:
-
-```bash
-make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --run"
-```
-
-The sweep runner processes BD_08_5D and the C6S5 control across configured
-section series `2..9`, writes
-`work/BD_08_5D/ihc_threshold_sweep_panel_<panel>.csv`, and flags results as
-`threshold_sweep_not_final`. It uses a rough automatic tissue ROI in memory at
-the exploratory downsample configured in `config/pipeline.yml`, so this is for
-threshold exploration only; final export still needs reviewed `tissue_v1`.
-
-The current exporter requires `tissue_v1` and measures inside that annotation,
-not the full rectangular image. Do not treat its positive-area result as final
-until `tissue_v1` has been reviewed/corrected and the IgG-FITC threshold has
-been approved.
-
-Example shape:
-
-```bash
-QuPath script --image "/path/to/section.vsi" \
-  --args "A,tissue_v1,16,200" \
-  src/ihc/qupath/detect_cells.groovy
-
-QuPath script --image "/path/to/section.vsi" \
-  --args "A,$PWD/work/BD_08_5D/ihc_threshold_sweep_A.csv,1,100;250;500;1000;2000;4000;8000;16000,8,tissue_v1,section_01" \
-  src/ihc/qupath/export_threshold_sweep.groovy
-
-QuPath script --image "/path/to/section.vsi" \
-  --args "A,$PWD/work/BD_08_5D/ihc_A.csv,1,<approved_threshold>,8,tissue_v1,section_01,approved" \
-  src/ihc/qupath/export_measurements.groovy
-```
-
-Argument order for `export_measurements.groovy`:
+The manual threshold dashboard writes:
 
 ```text
-panel,out_csv,igg_fitc_channel_index,igg_fitc_threshold,downsample,tissue_annotation_name,section_id,threshold_status
+work/BD_08_5D/ihc_manual_review/panel_A_threshold_review.html
+work/BD_08_5D/ihc_manual_review/panel_A_threshold_signoff_template.json
 ```
 
-Do not trust the placeholder threshold above. Fill it only after the calibration
-workflow has produced a reviewed/approved threshold.
+After manual review, place the downloaded decision at
+`work/BD_08_5D/ihc_manual_review/panel_A_threshold_review_decision.json` and
+run `make ihc-threshold-signoff` to create:
+
+```text
+work/BD_08_5D/ihc_threshold_signoff_panel_A.json
+work/BD_08_5D/ihc_threshold_signoff_panel_A.csv
+```
 
 ## Layout
 

@@ -17,11 +17,25 @@ mri:
   lesion_side: "image_right"   # v1 stroke default: lesion is on image-right in MRI viewer
 
 ihc:
+  section_thickness_um: null      # TODO: histology section thickness, e.g. 10
+  section_spacing_um: null        # TODO: physical interval/z-spacing if known
+  panel_section_matching: null    # TODO: matched/adjacent/unconfirmed; do not assume A/B section IDs match
+  ipsilateral_side_in_image: null # TODO: right/left only after slide orientation QC
+  orientation_qc_status: "pending"
+  qupath:
+    tissue_annotation_name: "tissue_v1"
+    artifact_exclusion_annotation_names: ["artifact_exclude"]
   panels:
     A:
       vsi_dir: null            # TODO: folder of 8 section .vsi files
       vsi_files: []            # TODO: explicit .vsi paths to process
       overview_vsi: null       # TODO: overview image if present
+      section_selection:
+        status: "pending_visual_qc"
+        selection_source: null
+        selected_section_ids: []
+        excluded_section_ids: []
+        notes: null
       # EXACT channel index -> marker. ORDER UNCONFIRMED; confirm in QuPath/Bio-Formats.
       channel_map:
         0: null                # e.g. "DAPI"
@@ -36,6 +50,14 @@ ihc:
       vsi_dir: null
       vsi_files: []
       overview_vsi: null
+      control_status: null      # controls only: e.g. corrupted_unavailable
+      exclude_from_threshold_calibration: false
+      section_selection:
+        status: "pending_visual_qc"
+        selection_source: null
+        selected_section_ids: []
+        excluded_section_ids: []
+        notes: null
       channel_map:
         0: null                # e.g. "DAPI"
         1: null                # e.g. "IBA1"

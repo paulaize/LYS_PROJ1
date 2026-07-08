@@ -19,6 +19,12 @@ mri:
   lesion_side: "image_right"
 
 ihc:
+  section_thickness_um: 10
+  section_spacing_um: null
+  panel_section_matching: "unconfirmed_do_not_match_by_section_id"
+  ipsilateral_side_in_image: "right"
+  contralateral_side_in_image: "left"
+  orientation_qc_status: "pending_visual_qc"
   threshold_controls:
     - animal_id: "C6S5"
       role: "no_lys241_control"
@@ -28,6 +34,7 @@ ihc:
         calibration. MRI is not required for this control in v1.
   qupath:
     tissue_annotation_name: "tissue_v1"
+    artifact_exclusion_annotation_names: ["artifact_exclude"]
     combined_csv_mode: "overwrite"
     series_index_base: 0
     label_series_index: 0
@@ -58,6 +65,7 @@ ihc:
       Each VSI has 10 QuPath/Bio-Formats images: label, whole-slide overview,
       then 8 separate 10 um brain-section images. Process section series only.
       Sections can be filtered later for tears/folds before quantification.
+      Panel A and Panel B section IDs are not assumed to be matched.
   igg_fitc_threshold_status: "pending_vehicle_control_calibration"
   panels:
     A:
@@ -65,6 +73,21 @@ ihc:
       vsi_files:
         - "data/5D/IHC/panel_A/BD_08_5D Podo NeuroT IgG___01.vsi"
       overview_vsi: null
+      section_selection:
+        status: "selected_by_visual_qc"
+        selection_source: "Paul visual QC (2026-07-08)"
+        selected_section_ids: ["section_01", "section_03", "section_06"]
+        excluded_section_ids:
+          - "section_02"
+          - "section_04"
+          - "section_05"
+          - "section_07"
+          - "section_08"
+        notes: >
+          Best Panel A sections selected by Paul: section_01, section_03, and
+          approximately section_06. Section_06 should be treated as usable with
+          visual-QC caution. Section_08 opened as a macro/non-tissue series in
+          section QC.
       channel_map:
         0: "DAPI"
         1: "IgG-FITC"
@@ -86,6 +109,21 @@ ihc:
       vsi_files:
         - "data/5D/IHC/panel_B/BD_08_5D IBA1 GFAP IgG_01.vsi"
       overview_vsi: null
+      section_selection:
+        status: "selected_by_visual_qc"
+        selection_source: "Paul visual QC (2026-07-08)"
+        selected_section_ids: ["section_05", "section_06", "section_08"]
+        excluded_section_ids:
+          - "section_01"
+          - "section_02"
+          - "section_03"
+          - "section_04"
+          - "section_07"
+        notes: >
+          Best available Panel B sections selected by Paul are section_05,
+          section_06, and section_08, although all Panel B sections are
+          imperfect. Section_04 and section_07 are excluded because Paul
+          confirmed those images were not saved properly.
       channel_map:
         0: "DAPI"
         1: "IgG-FITC"

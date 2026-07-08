@@ -9,7 +9,8 @@
  *
  * Argument order:
  *   panel,out_csv,igg_fitc_channel_index,thresholds_semicolon_list,downsample,
- *   tissue_annotation_name,section_id,tissue_mode,source_animal,source_role
+ *   tissue_annotation_name,section_id,tissue_mode,source_animal,source_role,
+ *   artifact_annotation_names
  */
 
 import qupath.lib.objects.PathObjects
@@ -37,6 +38,7 @@ def sectionId = parts.length > 6 && parts[6] ? parts[6] : ""
 def tissueMode = parts.length > 7 && parts[7] ? parts[7] : "require_reviewed"
 def sourceAnimal = parts.length > 8 && parts[8] ? parts[8] : ""
 def sourceRole = parts.length > 9 && parts[9] ? parts[9] : ""
+def artifactNames = parts.length > 10 && parts[10] ? splitNames(parts[10]) : ["artifact_exclude"]
 
 if (thresholds.isEmpty()) {
     throw new IllegalArgumentException("At least one threshold is required for the sweep")
@@ -70,6 +72,9 @@ def roi = tissue.getROI()
 if (roi == null) {
     throw new IllegalStateException("Annotation '${tissueName}' has no ROI")
 }
+def artifactRois = getAnnotationObjects()
+        .findAll { artifactNames.contains(it.getName()) && it.getROI() != null }
+        .collect { it.getROI() }
 
 int reqX = Math.max(0, (int)Math.floor(roi.getBoundsX()))
 int reqY = Math.max(0, (int)Math.floor(roi.getBoundsY()))
@@ -90,12 +95,19 @@ if (IGG_FITC_CH >= bands) {
 }
 
 long totalPx = 0
+long tissuePx = 0
+long artifactExcludedPx = 0
 long[] positive = new long[thresholds.size()]
 for (int y = 0; y < H; y++) {
     for (int x = 0; x < W; x++) {
         double fullX = reqX + (x + 0.5) * downsample
         double fullY = reqY + (y + 0.5) * downsample
         if (!roi.contains(fullX, fullY)) continue
+        tissuePx++
+        if (insideAny(artifactRois, fullX, fullY)) {
+            artifactExcludedPx++
+            continue
+        }
         totalPx++
         double v = raster.getSampleDouble(x, y, IGG_FITC_CH)
         for (int i = 0; i < thresholds.size(); i++) {
@@ -104,22 +116,25 @@ for (int y = 0; y < H; y++) {
     }
 }
 if (totalPx == 0) {
-    throw new IllegalStateException("Annotation '${tissueName}' sampled to zero pixels at downsample ${downsample}")
+    throw new IllegalStateException("Annotation '${tissueName}' sampled to zero valid pixels after artifact exclusion at downsample ${downsample}")
 }
 
 double scale = downsample * downsample * pxAreaUm2
 double totalAreaUm2 = totalPx * scale
+double tissueAreaUm2 = tissuePx * scale
+double artifactExcludedAreaUm2 = artifactExcludedPx * scale
 def name = getProjectEntry() ? getProjectEntry().getImageName() : server.getMetadata().getName()
 
 def tissueQc = tissueCreated ? "rough_tissue_auto_unreviewed" : "tissue_annotation_present"
-def header = "source_animal,source_role,image,panel,section_id,region,tissue_annotation,tissue_qc,igg_fitc_channel_index,threshold,downsample,igg_fitc_pos_area_um2,total_area_um2,igg_fitc_pct_positive_area,qc_flag\n"
+def artifactQc = artifactRois.isEmpty() ? "no_artifact_exclusion_annotations" : "artifact_excluded"
+def header = "source_animal,source_role,image,panel,section_id,region,tissue_annotation,tissue_qc,artifact_annotation_names,artifact_annotation_count,igg_fitc_channel_index,threshold,downsample,igg_fitc_pos_area_um2,total_area_um2,tissue_area_um2,artifact_excluded_area_um2,igg_fitc_pct_positive_area,qc_flag\n"
 def f = new File(outPath)
 if (!f.exists()) f.text = header
 for (int i = 0; i < thresholds.size(); i++) {
     double posArea = positive[i] * scale
     double pct = posArea / totalAreaUm2 * 100.0
-    def qc = tissueCreated ? "threshold_sweep_not_final;rough_tissue_auto_unreviewed" : "threshold_sweep_not_final"
-    def row = "${csv(sourceAnimal)},${csv(sourceRole)},${csv(name)},${csv(panel)},${csv(sectionId)},${csv(tissueName)},${csv(tissueName)},${csv(tissueQc)},${IGG_FITC_CH},${thresholds[i]},${downsample},${posArea},${totalAreaUm2},${pct},${csv(qc)}\n"
+    def qc = tissueCreated ? "threshold_sweep_not_final;rough_tissue_auto_unreviewed;${artifactQc}" : "threshold_sweep_not_final;${artifactQc}"
+    def row = "${csv(sourceAnimal)},${csv(sourceRole)},${csv(name)},${csv(panel)},${csv(sectionId)},${csv(tissueName)},${csv(tissueName)},${csv(tissueQc)},${csv(artifactNames.join(';'))},${artifactRois.size()},${IGG_FITC_CH},${thresholds[i]},${downsample},${posArea},${totalAreaUm2},${tissueAreaUm2},${artifactExcludedAreaUm2},${pct},${csv(qc)}\n"
     f.append(row)
 }
 
@@ -128,6 +143,17 @@ print "Wrote IgG-FITC threshold sweep for ${name} (${thresholds.size()} threshol
 String csv(value) {
     def s = value == null ? "" : value.toString()
     return "\"" + s.replace("\"", "\"\"") + "\""
+}
+
+List<String> splitNames(String value) {
+    return value.split(";").collect { it.trim() }.findAll { it }
+}
+
+boolean insideAny(rois, double x, double y) {
+    for (def r : rois) {
+        if (r.contains(x, y)) return true
+    }
+    return false
 }
 
 def createRoughTissueAnnotation(server, tissueName, downsample) {

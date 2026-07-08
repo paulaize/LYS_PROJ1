@@ -18,8 +18,15 @@ mri:
 
 ihc:
   control_role: "no_lys241_control"
+  section_thickness_um: 10
+  section_spacing_um: null
+  panel_section_matching: "unconfirmed_do_not_match_by_section_id"
+  ipsilateral_side_in_image: null
+  contralateral_side_in_image: null
+  orientation_qc_status: "not_applicable_control"
   qupath:
     tissue_annotation_name: "tissue_v1"
+    artifact_exclusion_annotation_names: ["artifact_exclude"]
     combined_csv_mode: "overwrite"
     series_index_base: 0
     label_series_index: 0
@@ -39,7 +46,8 @@ ihc:
     excluded_section_ids: []
     notes: >
       Control IHC files follow the same v1 QuPath/Bio-Formats series convention
-      as BD_08_5D: label, whole-slide overview, then 8 section images.
+      as BD_08_5D: label, whole-slide overview, then 8 section images. Panel A
+      and Panel B section IDs are not assumed to be matched.
   igg_fitc_threshold_status: "pending_control_calibration"
   panels:
     A:
@@ -47,6 +55,20 @@ ihc:
       vsi_files:
         - "data/C6S5/IHC/panel_A/BD_08_C6S5 C-_01.vsi"
       overview_vsi: null
+      section_selection:
+        status: "selected_by_visual_qc"
+        selection_source: "Paul visual QC (2026-07-08)"
+        selected_section_ids: ["section_05", "section_06", "section_07"]
+        excluded_section_ids:
+          - "section_01"
+          - "section_02"
+          - "section_03"
+          - "section_04"
+          - "section_08"
+        notes: >
+          Good no-LYS241 control Panel A sections selected by Paul:
+          section_05, section_06, and section_07. Earlier section_01 outputs
+          were smoke-test artifacts only because the section is visibly damaged.
       channel_map:
         0: "DAPI"
         1: "IgG-FITC"
@@ -69,6 +91,25 @@ ihc:
       vsi_files:
         - "data/C6S5/IHC/panel_B/BD_08_C6S5 C- IBA1 GFAP IgG_01.vsi"
       overview_vsi: null
+      control_status: "corrupted_unavailable"
+      exclude_from_threshold_calibration: true
+      section_selection:
+        status: "control_unavailable_file_corrupted"
+        selection_source: "Paul file check (2026-07-08)"
+        selected_section_ids: []
+        excluded_section_ids:
+          - "section_01"
+          - "section_02"
+          - "section_03"
+          - "section_04"
+          - "section_05"
+          - "section_06"
+          - "section_07"
+          - "section_08"
+        notes: >
+          Paul could not find a working C6S5 Panel B VSI file. The configured
+          file is treated as corrupted/unavailable for now. Do not use C6S5
+          Panel B for IgG-FITC threshold calibration.
       channel_map:
         0: "DAPI"
         1: "IgG-FITC"
