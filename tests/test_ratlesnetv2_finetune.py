@@ -362,6 +362,17 @@ def test_summarize_runs_writes_comparison_report(tmp_path):
     (run_dir / "experiment_metadata.json").write_text(
         json.dumps({"name": "rat_direct", "kind": "ratlesnetv2"})
     )
+    (run_dir / "run_config.json").write_text(
+        json.dumps(
+            {
+                "loss": "tversky",
+                "tversky_alpha": 0.3,
+                "tversky_beta": 0.7,
+                "lr": 1e-5,
+                "epochs": 5,
+            }
+        )
+    )
     (run_dir / "run_status.json").write_text(json.dumps({"status": "completed"}))
     (run_dir / "best_checkpoints.json").write_text(
         json.dumps(
@@ -430,6 +441,8 @@ def test_summarize_runs_writes_comparison_report(tmp_path):
     assert summaries[0].best_validation_dice == pytest.approx(0.55)
     comparison = (tmp_path / "report" / "comparison.csv").read_text()
     assert "rat_direct" in comparison
+    assert "tversky" in comparison
+    assert "alpha=0.3, beta=0.7" in comparison
     assert "0.55" in comparison
     assert (tmp_path / "report" / "report.html").exists()
     assert (tmp_path / "report" / "selected_recommendation.json").exists()

@@ -349,15 +349,19 @@ get one comparison report. The default config is:
 ratlesnetv2_finetune/configs/kaggle_experiment_grid.yml
 ```
 
-It currently enables four direct LYS experiments:
+It currently enables six direct LYS experiments:
 
 - `ratlesnet_direct_lr5e5`
 - `ratlesnet_direct_lr1e5`
+- `ratlesnet_direct_tversky_lr1e5`
+- `ratlesnet_direct_weighted_ce_dice_lr1e5`
 - `an2023_direct_lr1e5`
 - `an2023_direct_lr5e6`
 
-The external mouse stage is present but disabled in the YAML until direct LYS
-baselines are reviewed.
+The two extra RatLesNetV2 runs compare loss functions against
+`ratlesnet_direct_lr1e5`, which uses the default upstream CE+Dice loss. Focal
+Tversky and the external mouse stage are present but disabled in the YAML until
+the smaller direct LYS grid is reviewed.
 
 Kaggle setup after cloning/pulling this branch and creating the split folders:
 
@@ -397,6 +401,8 @@ Outputs:
   grid_run_records.json
   ratlesnet_direct_lr5e5/1/
   ratlesnet_direct_lr1e5/1/
+  ratlesnet_direct_tversky_lr1e5/1/
+  ratlesnet_direct_weighted_ce_dice_lr1e5/1/
   an2023_direct_lr1e5/1/
   an2023_direct_lr5e6/1/
 
@@ -495,13 +501,19 @@ Epoch: 1. Loss: 0.03367139. Val Loss: 0.012572014. LR: 1e-05. validation Dice: 0
 prediction. It is equivalent to aggregate lesion recall, but it is printed
 explicitly because it is easier to read during training.
 
-The default grid includes disabled examples for:
+The default grid enables:
 
-- `ratlesnet_direct_tversky_lr1e5`
+- default CE+Dice RatLesNetV2 at `1e-5`
+- Tversky RatLesNetV2 at `1e-5`
+- weighted CE+Dice RatLesNetV2 at `1e-5`
+
+The comparison report includes `loss`, `loss_params`, `lr`, and `epochs`
+columns so these runs can be compared directly. The grid also keeps a disabled
+example for:
+
 - `ratlesnet_direct_focal_tversky_lr1e5`
-- `ratlesnet_direct_weighted_ce_dice_lr1e5`
 
-Enable them by changing `enabled: false` to `enabled: true` in
+Enable it by changing `enabled: false` to `enabled: true` in
 `ratlesnetv2_finetune/configs/kaggle_experiment_grid.yml`.
 
 ## Continue Direct LYS Baseline

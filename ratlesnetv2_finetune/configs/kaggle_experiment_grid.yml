@@ -75,17 +75,16 @@ experiments:
     lr: 5e-6
     metrics_threshold: 0.8
 
-  # Optional RatLesNetV2 loss-function probes. Enable after reviewing the
-  # direct CE+Dice baselines above.
+  # RatLesNetV2 loss-function probes at the more conservative 1e-5 LR. These
+  # compare against ratlesnet_direct_lr1e5, which uses the default CE+Dice loss.
   - name: ratlesnet_direct_tversky_lr1e5
     kind: ratlesnetv2
-    enabled: false
     input: lys_train
     validation: lys_validation
     ratlesnet_repo: ratlesnet_repo
     pretrained_model: ratlesnet_pretrained
     require_pretrained: true
-    epochs: 20
+    epochs: 25
     lr: 1e-5
     loadMemory: 0
     loss: tversky
@@ -110,13 +109,12 @@ experiments:
 
   - name: ratlesnet_direct_weighted_ce_dice_lr1e5
     kind: ratlesnetv2
-    enabled: false
     input: lys_train
     validation: lys_validation
     ratlesnet_repo: ratlesnet_repo
     pretrained_model: ratlesnet_pretrained
     require_pretrained: true
-    epochs: 20
+    epochs: 25
     lr: 1e-5
     loadMemory: 0
     loss: weighted-ce-dice

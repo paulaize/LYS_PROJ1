@@ -23,6 +23,10 @@ COMPARISON_COLUMNS = [
     "rank",
     "experiment",
     "model",
+    "loss",
+    "loss_params",
+    "lr",
+    "epochs",
     "run_dir",
     "status",
     "best_epoch",
@@ -43,6 +47,10 @@ COMPARISON_COLUMNS = [
 class RunSummary:
     experiment: str
     model: str
+    loss: str
+    loss_params: str
+    lr: float | None
+    epochs: int | None
     run_dir: Path
     status: str
     best_epoch: int | None
@@ -62,6 +70,10 @@ class RunSummary:
             "rank": rank,
             "experiment": self.experiment,
             "model": self.model,
+            "loss": self.loss,
+            "loss_params": self.loss_params,
+            "lr": self.lr,
+            "epochs": self.epochs,
             "run_dir": str(self.run_dir),
             "status": self.status,
             "best_epoch": self.best_epoch,
@@ -179,6 +191,10 @@ def _summarize_run(run_dir: Path) -> RunSummary:
     return RunSummary(
         experiment=experiment,
         model=model,
+        loss=_loss_from_config(model, run_config),
+        loss_params=_loss_params_from_config(model, run_config),
+        lr=_to_float(run_config.get("lr")),
+        epochs=_to_int(run_config.get("epochs")),
         run_dir=run_dir,
         status=status,
         best_epoch=_to_int(best.get("epoch")) if best else None,
@@ -254,6 +270,36 @@ def _infer_model(run_dir: Path, run_config: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _loss_from_config(model: str, run_config: dict[str, Any]) -> str:
+    value = run_config.get("loss")
+    if value:
+        return str(value)
+    if model in {"ratlesnetv2", "an2023"}:
+        return "ce-dice"
+    return ""
+
+
+def _loss_params_from_config(model: str, run_config: dict[str, Any]) -> str:
+    loss = _loss_from_config(model, run_config)
+    if loss in {"tversky", "focal-tversky"}:
+        parts = [
+            f"alpha={run_config.get('tversky_alpha', '')}",
+            f"beta={run_config.get('tversky_beta', '')}",
+        ]
+        if loss == "focal-tversky":
+            parts.append(f"gamma={run_config.get('focal_tversky_gamma', '')}")
+        return ", ".join(part for part in parts if not part.endswith("="))
+    if loss == "weighted-ce-dice":
+        parts = [
+            f"background={run_config.get('background_class_weight', '')}",
+            f"lesion={run_config.get('lesion_class_weight', '')}",
+        ]
+        return ", ".join(part for part in parts if not part.endswith("="))
+    if model == "an2023" and run_config.get("positive_class_weight") is not None:
+        return f"positive={run_config.get('positive_class_weight')}"
+    return ""
+
+
 def _read_csv_dicts(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         return []
@@ -290,6 +336,9 @@ def _write_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
             "rank",
             "experiment",
             "model",
+            "loss",
+            "lr",
+            "epochs",
             "best_epoch",
             "best_validation_dice",
             "precision_mean",
@@ -310,6 +359,9 @@ def _write_html_report(path: Path, summaries: list[RunSummary], rows: list[dict[
         "rank",
         "experiment",
         "model",
+        "loss",
+        "lr",
+        "epochs",
         "best_epoch",
         "best_validation_dice",
         "precision_mean",
@@ -362,6 +414,7 @@ def _write_html_report(path: Path, summaries: list[RunSummary], rows: list[dict[
                 '<div class="card">',
                 f"<h3>{_html_escape(summary.experiment)}</h3>",
                 f"<p>Dice: {_format_md(summary.best_validation_dice)}; "
+                f"Loss: {_html_escape(summary.loss)}; "
                 f"Precision: {_format_md(summary.precision_mean)}; "
                 f"Recall: {_format_md(summary.recall_mean)}</p>",
                 (
@@ -392,6 +445,9 @@ def _write_recommendation(path: Path, summaries: list[RunSummary]) -> None:
             {
                 "candidate_experiment": candidate.experiment,
                 "candidate_model": candidate.model,
+                "candidate_loss": candidate.loss,
+                "candidate_loss_params": candidate.loss_params,
+                "candidate_lr": candidate.lr,
                 "candidate_run_dir": str(candidate.run_dir),
                 "best_validation_dice": candidate.best_validation_dice,
                 "best_epoch": candidate.best_epoch,
@@ -440,7 +496,10 @@ def _write_contact_sheet(path: Path, summaries: list[RunSummary], *, max_overlay
         else:
             ax.imshow(image)
         ax.set_title(
-            f"{summary.experiment}\nDice={_format_md(summary.best_validation_dice)}",
+            (
+                f"{summary.experiment}\n"
+                f"{summary.loss}; Dice={_format_md(summary.best_validation_dice)}"
+            ),
             fontsize=9,
         )
         ax.axis("off")
