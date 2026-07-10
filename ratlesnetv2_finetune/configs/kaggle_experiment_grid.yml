@@ -43,6 +43,7 @@ experiments:
     epochs: 15
     lr: 5e-5
     loadMemory: 0
+    enabled: false
 
   - name: ratlesnet_direct_lr1e5
     kind: ratlesnetv2
@@ -54,6 +55,7 @@ experiments:
     epochs: 25
     lr: 1e-5
     loadMemory: 0
+    enabled: false
 
   - name: an2023_direct_lr1e5
     kind: an2023
@@ -64,6 +66,7 @@ experiments:
     epochs: 15
     lr: 1e-5
     metrics_threshold: 0.8
+    enabled: false
 
   - name: an2023_direct_lr5e6
     kind: an2023
@@ -74,7 +77,8 @@ experiments:
     epochs: 20
     lr: 5e-6
     metrics_threshold: 0.8
-
+    enabled: false
+    
   # RatLesNetV2 loss-function probes at the more conservative 1e-5 LR. These
   # compare against ratlesnet_direct_lr1e5, which uses the default CE+Dice loss.
   - name: ratlesnet_direct_tversky_lr1e5
