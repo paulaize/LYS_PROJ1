@@ -28,6 +28,12 @@ Create or update private Kaggle datasets containing:
 - `External_Mouse_T2w_manual_LSP_SI_v0.tar.gz` from the Desktop archive;
 - this Git repository pushed on branch `dl-ratlesnetv2-finetune`.
 
+Kaggle may expose archive contents instead of the original tarball and may
+inconsistently decompress or truncate NIfTI filenames. Cell 2
+therefore identifies compression from the file bytes, fully validates every
+payload, and writes canonical `.nii.gz` inputs under `/kaggle/working`. Do not
+rename the Kaggle input files and do not write under `/kaggle/input`.
+
 The LYS archive contains 258 cases after the four requested exclusions. The
 external archive contains 426 prepared records. Its manifest has 426 distinct
 `animal_id` values; the source split therefore groups on the provided
@@ -47,6 +53,7 @@ import sys
 
 RUN_SEED = 20260715
 BRANCH = "dl-ratlesnetv2-finetune"
+RATLESNET_COMMIT = "c9dfb7eddf5c3369151d2f7a64add9a42b2d6983"
 
 subprocess.run(["nvidia-smi"], check=True)
 
@@ -62,6 +69,10 @@ if not (PROJECT / ".git").is_dir():
     )
 else:
     subprocess.run(["git", "-C", str(PROJECT), "pull", "--ff-only"], check=True)
+
+PROJECT_COMMIT = subprocess.check_output(
+    ["git", "-C", str(PROJECT), "rev-parse", "HEAD"], text=True
+).strip()
 
 subprocess.run(
     [
@@ -82,22 +93,56 @@ if not (RAT_REPO / ".git").is_dir():
         check=True,
     )
 
+subprocess.run(
+    [
+        "git", "-C", str(RAT_REPO), "fetch", "--depth", "1",
+        "origin", RATLESNET_COMMIT,
+    ],
+    check=True,
+)
+subprocess.run(
+    ["git", "-C", str(RAT_REPO), "checkout", "--detach", RATLESNET_COMMIT],
+    check=True,
+)
+resolved_ratlesnet_commit = subprocess.check_output(
+    ["git", "-C", str(RAT_REPO), "rev-parse", "HEAD"], text=True
+).strip()
+assert resolved_ratlesnet_commit == RATLESNET_COMMIT
+
 RAT_PRETRAINED = (
     RAT_REPO
     / "trained_models/Table2-3/RatLesNetv2/homogeneous/model-1"
 )
 assert RAT_PRETRAINED.is_file(), RAT_PRETRAINED
 print("Project:", PROJECT)
+print("Project commit:", PROJECT_COMMIT)
+print("RatLesNetV2 commit:", resolved_ratlesnet_commit)
 print("Upstream RatLesNet checkpoint:", RAT_PRETRAINED)
 ```
 
-## Cell 2 — locate or extract both prepared datasets
+## Cell 2 — locate, validate, and normalize both prepared datasets
 
 This reads `/kaggle/input` and extracts only into `/kaggle/working` when
-Kaggle has not already exposed the archive contents.
+Kaggle has not already exposed the archive contents. It then builds a clean,
+canonical copy under `/kaggle/working/normalized_inputs`.
+
+This normalization is required even when the sidebar names look reasonable.
+It detects plain versus gzip data from the payload rather than the suffix,
+forces every complete array to load, checks scan/mask geometry, requires the
+two packaged lesion-mask copies to be identical, and verifies that saving to
+canonical `.nii.gz` did not change the arrays or affines. A
+`normalization_report.csv` is retained for provenance.
 
 ```python
+import csv
+import os
+import shutil
 import tarfile
+import tempfile
+
+import nibabel as nib
+import numpy as np
+
 
 def locate_or_extract_prepared_dataset(dataset_name: str) -> Path:
     input_root = Path("/kaggle/input")
@@ -122,13 +167,275 @@ def locate_or_extract_prepared_dataset(dataset_name: str) -> Path:
     assert len(matches) == 1, matches
     return matches[0].parent
 
-LYS_ROOT = locate_or_extract_prepared_dataset("LYS_T2w_manual_v1")
-EXTERNAL_ROOT = locate_or_extract_prepared_dataset(
+
+NORMALIZED_BASE = WORK / "normalized_inputs"
+NORMALIZED_BASE.mkdir(parents=True, exist_ok=True)
+NORMALIZATION_TMP = WORK / "nifti_normalization_tmp"
+NORMALIZATION_TMP.mkdir(parents=True, exist_ok=True)
+
+
+def payload_transport(path: Path) -> str:
+    with path.open("rb") as handle:
+        magic = handle.read(2)
+    return "gzip" if magic == b"\x1f\x8b" else "plain"
+
+
+def require_one(paths, *, role: str, case_id: str) -> Path:
+    paths = list(paths)
+    if len(paths) != 1:
+        raise RuntimeError(
+            f"{case_id}: expected exactly one {role}; found "
+            f"{[path.name for path in paths]}"
+        )
+    return paths[0]
+
+
+def stage_with_correct_extension(
+    source: Path,
+    temporary_dir: Path,
+    staged_name: str,
+) -> tuple[Path, str]:
+    transport = payload_transport(source)
+    suffix = ".nii.gz" if transport == "gzip" else ".nii"
+    staged = temporary_dir / f"{staged_name}{suffix}"
+    shutil.copyfile(source, staged)
+    return staged, transport
+
+
+def full_array(image, *, source: Path) -> np.ndarray:
+    data = np.asarray(image.dataobj)
+    if not np.isfinite(data).all():
+        raise RuntimeError(f"Non-finite values found in {source}")
+    return data
+
+
+def normalize_prepared_dataset(
+    source_root: Path,
+    *,
+    dataset_name: str,
+    expected_cases: int,
+) -> Path:
+    final_root = NORMALIZED_BASE / dataset_name
+    building_root = NORMALIZED_BASE / f".{dataset_name}.building"
+
+    if final_root.exists():
+        scans = list(final_root.rglob("scan.nii.gz"))
+        labels = list(final_root.rglob("scan_lesionIAM.nii.gz"))
+        aliases = list(final_root.rglob("scan_lesion.nii.gz"))
+        assert len(scans) == expected_cases, len(scans)
+        assert len(labels) == expected_cases, len(labels)
+        assert len(aliases) == expected_cases, len(aliases)
+        assert (final_root / "manifest.csv").is_file()
+        assert (final_root / "normalization_report.csv").is_file()
+        print("Using existing normalized dataset:", final_root)
+        return final_root
+
+    # Only an incomplete disposable build is removed on a rerun.
+    if building_root.exists():
+        shutil.rmtree(building_root)
+    building_root.mkdir(parents=True)
+
+    manifest_path = source_root / "manifest.csv"
+    with manifest_path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == expected_cases, (dataset_name, len(rows), expected_cases)
+
+    fieldnames = list(rows[0])
+    for column in ("case_dir", "scan_path", "label_path"):
+        if column not in fieldnames:
+            fieldnames.append(column)
+
+    output_rows = []
+    report_rows = []
+
+    for index, row in enumerate(rows, start=1):
+        case_id = row["case_id"]
+        relative_case = (
+            Path(row["split"])
+            / row["study"]
+            / row["timepoint"]
+            / case_id
+        )
+        source_case = source_root / relative_case
+        destination_case = building_root / relative_case
+        final_case = final_root / relative_case
+
+        if not source_case.is_dir():
+            raise FileNotFoundError(
+                f"{case_id}: missing source case directory {source_case}"
+            )
+
+        files = [path for path in source_case.iterdir() if path.is_file()]
+        source_scan = require_one(
+            (
+                path
+                for path in files
+                if path.name in {"scan.nii", "scan.nii.gz"}
+            ),
+            role="scan",
+            case_id=case_id,
+        )
+        source_iam = require_one(
+            (path for path in files if path.name.startswith("scan_lesionIAM.")),
+            role="IAM lesion mask",
+            case_id=case_id,
+        )
+        source_alias = require_one(
+            (path for path in files if path.name.startswith("scan_lesion.")),
+            role="lesion-mask alias",
+            case_id=case_id,
+        )
+        destination_case.mkdir(parents=True)
+
+        with tempfile.TemporaryDirectory(
+            dir=NORMALIZATION_TMP,
+            prefix=f"{index:04d}_",
+        ) as temporary:
+            temporary = Path(temporary)
+            staged_scan, scan_transport = stage_with_correct_extension(
+                source_scan, temporary, "source_scan"
+            )
+            staged_iam, iam_transport = stage_with_correct_extension(
+                source_iam, temporary, "source_iam"
+            )
+            staged_alias, alias_transport = stage_with_correct_extension(
+                source_alias, temporary, "source_alias"
+            )
+
+            scan_image = nib.load(str(staged_scan))
+            iam_image = nib.load(str(staged_iam))
+            alias_image = nib.load(str(staged_alias))
+            scan_data = full_array(scan_image, source=source_scan)
+            iam_data = full_array(iam_image, source=source_iam)
+            alias_data = full_array(alias_image, source=source_alias)
+
+            if scan_data.ndim != 4 or scan_data.shape[-1] != 1:
+                raise RuntimeError(
+                    f"{case_id}: expected scan shape (X,Y,Z,1); "
+                    f"found {scan_data.shape}"
+                )
+            if iam_data.shape != scan_data.shape[:3]:
+                raise RuntimeError(
+                    f"{case_id}: scan/mask shape mismatch: "
+                    f"{scan_data.shape} versus {iam_data.shape}"
+                )
+            if alias_data.shape != iam_data.shape:
+                raise RuntimeError(
+                    f"{case_id}: IAM/alias shape mismatch: "
+                    f"{iam_data.shape} versus {alias_data.shape}"
+                )
+            if not np.array_equal(iam_data, alias_data):
+                raise RuntimeError(
+                    f"{case_id}: IAM and alias lesion masks are not identical"
+                )
+            unique_values = np.unique(iam_data)
+            if not np.all(np.isin(unique_values, (0, 1))):
+                raise RuntimeError(
+                    f"{case_id}: non-binary lesion mask values: "
+                    f"{unique_values[:20]}"
+                )
+            for role, image in (
+                ("IAM mask", iam_image),
+                ("alias mask", alias_image),
+            ):
+                if not np.allclose(
+                    scan_image.affine,
+                    image.affine,
+                    rtol=0,
+                    atol=1e-5,
+                ):
+                    raise RuntimeError(f"{case_id}: scan/{role} affine mismatch")
+
+            temporary_outputs = {
+                "scan.nii.gz": (scan_image, scan_data),
+                "scan_lesionIAM.nii.gz": (iam_image, iam_data),
+                "scan_lesion.nii.gz": (alias_image, alias_data),
+            }
+            for filename, (image, expected_data) in temporary_outputs.items():
+                temporary_output = temporary / filename
+                nib.save(image, str(temporary_output))
+                reloaded = nib.load(str(temporary_output))
+                reloaded_data = np.asarray(reloaded.dataobj)
+                if not np.array_equal(reloaded_data, expected_data):
+                    raise RuntimeError(
+                        f"{case_id}: data changed while writing {filename}"
+                    )
+                if not np.allclose(
+                    reloaded.affine,
+                    image.affine,
+                    rtol=0,
+                    atol=1e-7,
+                ):
+                    raise RuntimeError(
+                        f"{case_id}: affine changed while writing {filename}"
+                    )
+                os.replace(temporary_output, destination_case / filename)
+
+        output_row = dict(row)
+        output_row["case_dir"] = str(final_case)
+        output_row["scan_path"] = str(final_case / "scan.nii.gz")
+        output_row["label_path"] = str(final_case / "scan_lesionIAM.nii.gz")
+        output_rows.append(output_row)
+        report_rows.append(
+            {
+                "case_id": case_id,
+                "source_scan_name": source_scan.name,
+                "source_scan_transport": scan_transport,
+                "source_iam_name": source_iam.name,
+                "source_iam_transport": iam_transport,
+                "source_alias_name": source_alias.name,
+                "source_alias_transport": alias_transport,
+                "scan_shape": str(tuple(scan_data.shape)),
+                "mask_shape": str(tuple(iam_data.shape)),
+                "iam_alias_identical": True,
+            }
+        )
+
+        if index % 25 == 0 or index == expected_cases:
+            print(f"{dataset_name}: normalized {index}/{expected_cases}")
+
+    with (building_root / "manifest.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(output_rows)
+    with (building_root / "normalization_report.csv").open(
+        "w", newline=""
+    ) as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(report_rows[0]))
+        writer.writeheader()
+        writer.writerows(report_rows)
+
+    assert len(list(building_root.rglob("scan.nii.gz"))) == expected_cases
+    assert (
+        len(list(building_root.rglob("scan_lesionIAM.nii.gz")))
+        == expected_cases
+    )
+    assert (
+        len(list(building_root.rglob("scan_lesion.nii.gz")))
+        == expected_cases
+    )
+    building_root.rename(final_root)
+    print("Normalized dataset written:", final_root)
+    return final_root
+
+
+LYS_SOURCE_ROOT = locate_or_extract_prepared_dataset("LYS_T2w_manual_v1")
+EXTERNAL_SOURCE_ROOT = locate_or_extract_prepared_dataset(
     "External_Mouse_T2w_manual_LSP_SI_v0"
 )
+LYS_ROOT = normalize_prepared_dataset(
+    LYS_SOURCE_ROOT,
+    dataset_name="LYS_T2w_manual_v1",
+    expected_cases=258,
+)
+EXTERNAL_ROOT = normalize_prepared_dataset(
+    EXTERNAL_SOURCE_ROOT,
+    dataset_name="External_Mouse_T2w_manual_LSP_SI_v0",
+    expected_cases=426,
+)
 
-assert sum(1 for _ in LYS_ROOT.rglob("scan.nii.gz")) == 258
-assert sum(1 for _ in EXTERNAL_ROOT.rglob("scan.nii.gz")) == 426
+assert len(list(LYS_ROOT.rglob("scan.nii.gz"))) == 258
+assert len(list(EXTERNAL_ROOT.rglob("scan.nii.gz"))) == 426
 print("LYS_ROOT:", LYS_ROOT)
 print("EXTERNAL_ROOT:", EXTERNAL_ROOT)
 ```
@@ -283,7 +590,11 @@ LOSS_CONFIGS = {
     },
 }
 
-def successful_run(output_root: Path) -> Path | None:
+def successful_run(
+    output_root: Path,
+    *,
+    require_model: bool = True,
+) -> Path | None:
     if not output_root.is_dir():
         return None
     candidates = sorted(
@@ -293,7 +604,9 @@ def successful_run(output_root: Path) -> Path | None:
     for run in reversed(candidates):
         status_path = run / "run_status.json"
         model_path = run / "RatLesNetv2.model"
-        if not status_path.is_file() or not model_path.is_file():
+        if not status_path.is_file():
+            continue
+        if require_model and not model_path.is_file():
             continue
         status = json.loads(status_path.read_text()).get("status")
         if status in {"completed", "early_stopped", "evaluated"}:
@@ -709,7 +1022,15 @@ assert threshold_record["locked_test_used"] is False
 
 frozen_spec = {
     "dataset": "LYS_v1",
+    "project_git_commit": PROJECT_COMMIT,
+    "ratlesnetv2_git_commit": resolved_ratlesnet_commit,
     "split_assignments": str(GROUPED_ROOT / "split_assignments.csv"),
+    "normalized_input_provenance": {
+        "lys_manifest_sha256": sha256(LYS_ROOT / "manifest.csv"),
+        "lys_report": str(LYS_ROOT / "normalization_report.csv"),
+        "external_manifest_sha256": sha256(EXTERNAL_ROOT / "manifest.csv"),
+        "external_report": str(EXTERNAL_ROOT / "normalization_report.csv"),
+    },
     "architecture": "RatLesNetV2",
     "selected_loss_run": SELECTED_DIRECT,
     "selected_initialization": SELECTED_INITIALIZATION,
@@ -735,9 +1056,9 @@ FROZEN_SPEC.write_text(json.dumps(frozen_spec, indent=2, sort_keys=True) + "\n")
 display(frozen_spec)
 ```
 
-Save the frozen JSON, both paired-comparison folders, OOF threshold folder, all
-five final checkpoints, split assignments, and source checkpoint if selected.
-Only then continue.
+Save the frozen JSON, both normalization reports, both paired-comparison
+folders, OOF threshold folder, all five final checkpoints, split assignments,
+and source checkpoint if selected. Only then continue.
 
 ## Cell 17 — locked-test gate
 
@@ -764,7 +1085,7 @@ FROZEN_THRESHOLD = str(threshold_record["selected_threshold"])
 
 def export_test_if_needed(fold: int, model: Path) -> Path:
     output = TEST_EXPORT_ROOT / f"fold_{fold}"
-    existing = successful_run(output)
+    existing = successful_run(output, require_model=False)
     if existing is None:
         fold_train = GROUPED_ROOT / "folds" / f"fold_{fold}" / "train"
         command = [
@@ -787,7 +1108,7 @@ def export_test_if_needed(fold: int, model: Path) -> Path:
             "--loadMemory", "0",
         ] + list(SELECTED_LOSS_CONFIG["extra"])
         subprocess.run(command, cwd=PROJECT, check=True)
-        existing = successful_run(output)
+        existing = successful_run(output, require_model=False)
     assert existing is not None
     manifest = existing / "prediction_exports/test/final/prediction_export_manifest.csv"
     assert manifest.is_file(), manifest
@@ -834,19 +1155,108 @@ This locked-test result is the final unbiased estimate for the frozen model. Do
 not change the model because one test cohort or case performed poorly. Any
 future change starts a new version and needs a new untouched test design.
 
+## Cell 20 — package the final reproducibility artifacts
+
+This deliberately excludes the normalized image copies and the symlinked fold
+trees because the source datasets already exist as private Kaggle inputs. It
+includes the input manifests and normalization reports, QC, split provenance,
+all training runs and checkpoints, OOF outputs, comparisons, frozen rule, test
+probability exports, and final ensemble report. Do not overwrite an older
+bundle from a previous scientific run.
+
+```python
+ARTIFACT_BUNDLE = WORK / "LYS_v1_RatLesNetV2_final_artifacts.tar.gz"
+assert not ARTIFACT_BUNDLE.exists(), ARTIFACT_BUNDLE
+
+required_group_metadata = [
+    GROUPED_ROOT / "split_assignments.csv",
+    GROUPED_ROOT / "inferred_subject_groups.csv",
+    GROUPED_ROOT / "split_summary.json",
+]
+required_external_metadata = [
+    EXTERNAL_SPLIT / "manifest.csv",
+    EXTERNAL_SPLIT / "split_summary.json",
+]
+for path in required_group_metadata + required_external_metadata:
+    assert path.is_file(), path
+
+bundle_items = [
+    (PROJECT / "docs/ratlesnetv2_lys_v1_kaggle_workflow.md", "guide.md"),
+    (LYS_ROOT / "manifest.csv", "input_provenance/LYS_manifest.csv"),
+    (
+        LYS_ROOT / "normalization_report.csv",
+        "input_provenance/LYS_normalization_report.csv",
+    ),
+    (
+        EXTERNAL_ROOT / "manifest.csv",
+        "input_provenance/external_manifest.csv",
+    ),
+    (
+        EXTERNAL_ROOT / "normalization_report.csv",
+        "input_provenance/external_normalization_report.csv",
+    ),
+    (QC_ROOT, "lys_qc"),
+    (RUNS_ROOT, "runs"),
+    (THRESHOLD_ROOT, "thresholds"),
+    (WORK / "lys_v1_comparisons", "comparisons"),
+    (FROZEN_SPEC, "frozen/lys_v1_final_frozen_spec.json"),
+    (TEST_EXPORT_ROOT, "locked_test/fold_predictions"),
+    (FINAL_TEST_OUTPUT, "locked_test/final_ensemble"),
+]
+bundle_items += [
+    (path, f"split_provenance/LYS/{path.name}")
+    for path in required_group_metadata
+]
+bundle_items += [
+    (path, f"split_provenance/external/{path.name}")
+    for path in required_external_metadata
+]
+
+for source, _ in bundle_items:
+    assert source.exists(), source
+
+bundle_record = {
+    "project_git_commit": PROJECT_COMMIT,
+    "ratlesnetv2_git_commit": resolved_ratlesnet_commit,
+    "final_candidate": FINAL_CANDIDATE,
+    "selected_initialization": SELECTED_INITIALIZATION,
+    "selected_threshold": threshold_record["selected_threshold"],
+    "items": [archive_name for _, archive_name in bundle_items],
+}
+BUNDLE_RECORD = WORK / "LYS_v1_artifact_bundle_contents.json"
+BUNDLE_RECORD.write_text(
+    json.dumps(bundle_record, indent=2, sort_keys=True) + "\n"
+)
+bundle_items.append((BUNDLE_RECORD, "bundle_contents.json"))
+
+with tarfile.open(ARTIFACT_BUNDLE, "w:gz") as archive:
+    for source, archive_name in bundle_items:
+        archive.add(source, arcname=archive_name, recursive=True)
+
+print("Artifact bundle:", ARTIFACT_BUNDLE)
+print("Size GiB:", round(ARTIFACT_BUNDLE.stat().st_size / 1024**3, 3))
+print("SHA-256:", sha256(ARTIFACT_BUNDLE))
+```
+
+Use Kaggle **Save Version** with output saving enabled. Confirm that the
+artifact tarball appears in the saved notebook output before ending the
+session.
+
 ## What is intentionally deferred
 
 - nnU-Net is a valuable later benchmark, but it is not required to complete
   this controlled RatLesNetV2 path.
 - Additional losses are deferred because Tversky and CE+Dice already represent
   the most credible direct candidates from the preliminary work.
-- normalization, N4, augmentation, small-lesion sampling, and postprocessing
+- Intensity normalization, N4, augmentation, small-lesion sampling, and
+  postprocessing
   ablations should be tested one at a time using OOF development predictions
   before another locked-test version; none should be improvised after Cell 17.
 - negative-control performance can only be estimated when representative
   lesion-negative LYS cases are available and explicitly labeled.
 
-The experiment is complete only when the split, 15 target fold checkpoints
-(10 direct plus 5 external-initialized), one external source checkpoint, three
-OOF calibrations, two paired-comparison reports, frozen specification, five
-final test probability exports, and final ensemble report are preserved.
+The experiment is complete only when both normalization reports, the split,
+15 target fold checkpoints (10 direct plus 5 external-initialized), one
+external source checkpoint, three OOF calibrations, two paired-comparison
+reports, frozen specification, five final test probability exports, and final
+ensemble report are preserved in the final artifact bundle.
