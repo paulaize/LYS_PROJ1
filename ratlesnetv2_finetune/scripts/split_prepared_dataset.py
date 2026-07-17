@@ -260,7 +260,16 @@ def _prepare_output_root(output_root: Path, *, overwrite: bool) -> None:
 def _materialize_case_dir(source_dir: Path, dest_dir: Path, *, copy_mode: str) -> None:
     dest_dir.parent.mkdir(parents=True, exist_ok=True)
     if copy_mode == "symlink":
-        dest_dir.symlink_to(source_dir.resolve(), target_is_directory=True)
+        # RatLesNetV2 discovers cases with a recursive directory walk. A
+        # symlink to the whole case directory is not followed by that walk,
+        # so create the real case directory and link its files instead.
+        dest_dir.mkdir()
+        for source_path in source_dir.iterdir():
+            destination_path = dest_dir / source_path.name
+            if source_path.is_dir():
+                shutil.copytree(source_path, destination_path, symlinks=True)
+            else:
+                destination_path.symlink_to(source_path.resolve())
         return
     shutil.copytree(source_dir, dest_dir)
 

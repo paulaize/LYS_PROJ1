@@ -259,6 +259,7 @@ def _append_common_options(
     include_an_options: bool,
 ) -> None:
     option_map = {
+        "seed": "--seed",
         "save_every": "--save-every",
         "eval_every": "--eval-every",
         "metrics_threshold": "--metrics-threshold",

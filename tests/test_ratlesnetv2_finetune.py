@@ -26,6 +26,7 @@ from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
     _parse_export_splits,
     _patch_nibabel_get_data_compat,
     _publish_latest_qc_overlay,
+    _restore_selected_checkpoint,
     _save_prediction_artifacts,
     _scheduler_metric_value,
     _segmentation_metrics,
@@ -611,6 +612,51 @@ def test_split_prepared_dataset_creates_disjoint_train_validation_test(tmp_path)
     assert (result.output_root / "test").is_dir()
 
 
+def test_split_prepared_dataset_symlink_mode_keeps_cases_visible_to_recursive_scan(tmp_path):
+    source_dir = tmp_path / "source"
+    scan_dir = source_dir / "T2w"
+    mask_dir = source_dir / "masks"
+    scan_dir.mkdir(parents=True)
+    mask_dir.mkdir()
+    split_cases = []
+    for index in range(3):
+        case_id = f"external_{index:02d}"
+        scan = scan_dir / f"{case_id}.nii.gz"
+        mask = mask_dir / f"{case_id}_lesion_mask.nii.gz"
+        _write_nifti(scan, np.ones((8, 9, 3), dtype=np.float32))
+        _write_nifti(mask, np.ones((8, 9, 3), dtype=np.uint8))
+        split_cases.append(
+            {
+                "animal_id": case_id,
+                "study": "external",
+                "timepoint": "mixed",
+                "case_id": case_id,
+                "scan_nifti": str(scan),
+                "lesion_mask": str(mask),
+            }
+        )
+    plan = _write_empty_plan(tmp_path)
+    loaded = yaml.safe_load(plan.read_text())
+    loaded["splits"]["train"] = split_cases
+    plan.write_text(yaml.safe_dump(loaded))
+    dataset_root, _prepared = prepare_dataset(plan, repo_root=tmp_path)
+
+    result = split_prepared_dataset(
+        input_root=dataset_root,
+        output_root=tmp_path / "external_split",
+        validation_count=1,
+        test_count=0,
+        seed=1,
+        copy_mode="symlink",
+    )
+
+    scans = list(result.output_root.rglob("scan.nii.gz"))
+    labels = list(result.output_root.rglob("scan_lesionIAM.nii.gz"))
+    assert len(scans) == 3
+    assert len(labels) == 3
+    assert all(path.is_symlink() for path in scans + labels)
+
+
 def test_review_lys_masks_prepares_editable_copy_without_touching_source(tmp_path):
     source_root = tmp_path / "LYS_RatLesNetV2_clean_source" / "ratlesnetv2_clean_source"
     scan_dir = source_root / "T2w"
@@ -957,6 +1003,41 @@ def test_best_checkpoint_writer_saves_dice_and_loss_models(tmp_path):
     assert (tmp_path / "best_by_validation_dice.model").exists()
     assert (tmp_path / "best_by_validation_loss.model").exists()
     assert (tmp_path / "best_checkpoints.json").exists()
+
+
+def test_final_selection_restores_best_validation_dice_checkpoint(tmp_path):
+    checkpoint = tmp_path / "best_by_validation_dice.model"
+    checkpoint.write_text("saved")
+
+    class FakeModel:
+        def __init__(self):
+            self.loaded = None
+
+        def load_state_dict(self, state):
+            self.loaded = state
+
+    class FakeTorch:
+        @staticmethod
+        def load(path, map_location=None):
+            assert Path(path) == checkpoint
+            assert map_location == "cpu"
+            return {"weight": 2}
+
+    model = FakeModel()
+    selected = _restore_selected_checkpoint(
+        torch=FakeTorch,
+        model=model,
+        run_dir=tmp_path,
+        best_state={
+            "validation_dice": {
+                "filename": "best_by_validation_dice.model",
+            }
+        },
+        device="cpu",
+    )
+
+    assert selected == checkpoint
+    assert model.loaded == {"weight": 2}
 
 
 def test_scheduler_metric_value_uses_validation_dice_or_loss():

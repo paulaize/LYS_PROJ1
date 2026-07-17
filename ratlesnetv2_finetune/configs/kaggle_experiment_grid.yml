@@ -78,7 +78,7 @@ experiments:
     lr: 5e-6
     metrics_threshold: 0.8
     enabled: false
-    
+
   # RatLesNetV2 loss-function probes at the more conservative 1e-5 LR. These
   # compare against ratlesnet_direct_lr1e5, which uses the default CE+Dice loss.
   - name: ratlesnet_direct_tversky_lr1e5
@@ -126,6 +126,7 @@ experiments:
     lesion_class_weight: 5.0
 
   # Keep disabled until the direct LYS baselines are reviewed.
+  # I am pretty sure this is not the right direction anymore 
   - name: ratlesnet_external_short_lr5e5
     kind: ratlesnetv2
     enabled: false

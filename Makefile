@@ -4,7 +4,7 @@ IHC ?=
 RUN_ARGS ?=
 RATLESNET_CONFIG ?= ratlesnetv2_finetune/configs/dataset_template.yml
 
-.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-threshold-sweeps ratlesnetv2-roiset-to-mask ratlesnetv2-add-source ratlesnetv2-download-external ratlesnetv2-orient-external-lsp ratlesnetv2-flip-external-si ratlesnetv2-prepare-lys-roisets ratlesnetv2-review-lys-masks ratlesnetv2-prepare ratlesnetv2-split-prepared ratlesnetv2-cloud-plan an2023-finetune training-grid summarize-training-grid run clean
+.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-threshold-sweeps ratlesnetv2-roiset-to-mask ratlesnetv2-add-source ratlesnetv2-download-external ratlesnetv2-orient-external-lsp ratlesnetv2-flip-external-si ratlesnetv2-prepare-lys-roisets ratlesnetv2-review-lys-masks ratlesnetv2-prepare ratlesnetv2-package ratlesnetv2-split-prepared ratlesnetv2-audit ratlesnetv2-grouped-cv ratlesnetv2-calibrate-threshold ratlesnetv2-evaluate-ensemble ratlesnetv2-cloud-plan an2023-finetune training-grid summarize-training-grid run clean
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
@@ -51,8 +51,23 @@ ratlesnetv2-review-lys-masks:
 ratlesnetv2-prepare:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.prepare_dataset --config $(RATLESNET_CONFIG) $(RUN_ARGS)
 
+ratlesnetv2-package:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.package_prepared_dataset $(RUN_ARGS)
+
 ratlesnetv2-split-prepared:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.split_prepared_dataset $(RUN_ARGS)
+
+ratlesnetv2-audit:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.audit_prepared_dataset $(RUN_ARGS)
+
+ratlesnetv2-grouped-cv:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.create_grouped_cv $(RUN_ARGS)
+
+ratlesnetv2-calibrate-threshold:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.calibrate_probability_threshold $(RUN_ARGS)
+
+ratlesnetv2-evaluate-ensemble:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.evaluate_probability_ensemble $(RUN_ARGS)
 
 ratlesnetv2-cloud-plan:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.plan_cloud_run --config $(RATLESNET_CONFIG) $(RUN_ARGS)

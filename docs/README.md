@@ -22,7 +22,9 @@ to `legacy/`.
   current RatLesNetV2 strategy and branch status.
 - [ratlesnetv2_external_datasets.md](ratlesnetv2_external_datasets.md) -
   public mouse dataset policy for RatLesNetV2 adaptation.
+- [ratlesnetv2_lys_v1_kaggle_workflow.md](ratlesnetv2_lys_v1_kaggle_workflow.md) -
+  active corrected-LYS five-fold loss, external-pretraining, OOF calibration,
+  and one-time locked-test Kaggle protocol.
 
-The command-heavy deep-learning runbook for RatLesNetV2, the An et al. 2023
-quick comparator, and the Kaggle training-grid report lives at
+The supporting RatLesNetV2 command map lives at
 [../ratlesnetv2_finetune/README.md](../ratlesnetv2_finetune/README.md).

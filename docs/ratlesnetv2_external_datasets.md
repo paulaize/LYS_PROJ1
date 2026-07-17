@@ -1,17 +1,19 @@
 # RatLesNetV2 External Mouse Datasets
 
-Last updated: 2026-07-07
+Last updated: 2026-07-15
 
 This document defines which public mouse MRI data can be used for RatLesNetV2
 adaptation. It is a reference for dataset selection and provenance, not the
-training runbook. Training commands live in
-[../ratlesnetv2_finetune/README.md](../ratlesnetv2_finetune/README.md).
+training runbook. The active training protocol lives in
+[ratlesnetv2_lys_v1_kaggle_workflow.md](ratlesnetv2_lys_v1_kaggle_workflow.md).
 
 ## Current Decision
 
 Direct rat-pretrained -> LYS fine-tuning is the main baseline. Public mouse
-adaptation is now optional and should be kept only if it improves downstream
-LYS validation after LYS fine-tuning.
+adaptation is a controlled comparator. Its source checkpoint must be selected
+using external train/validation only, then fine-tuned with the selected loss on
+the same five LYS development folds as the direct baseline. Keep it only if the
+paired OOF comparison shows a repeatable downstream LYS benefit.
 
 External data are never the final target-domain test. Held-out LYS cases are
 the only valid final performance claim.
@@ -40,6 +42,12 @@ This folder is the current non-Mulder external source after:
 3. applying the confirmed superior/inferior voxel-array flip
 
 Current prepared count: 426 scan/mask pairs.
+
+The current upload archive is
+`External_Mouse_T2w_manual_LSP_SI_v0.tar.gz`. Its prepared manifest contains
+426 distinct `animal_id` values. The active Kaggle workflow uses those IDs for
+an external-only 80/20 train/validation split and records the limitation that
+richer source-animal metadata is not currently available.
 
 | Dataset | Shape | Count |
 |---|---:|---:|
@@ -194,11 +202,15 @@ mask_voxels > 0
 
 ## Pipeline Placement
 
-Use this document to decide and clean external data. Then use the RatLesNetV2
-runbook to:
+Use this document to decide and clean external data. Then use the active Kaggle
+workflow to:
 
-1. prepare or split datasets
-2. run direct LYS baseline
-3. run optional external adaptation
-4. compare downstream LYS validation
-5. reserve held-out LYS test until the final selected strategy
+1. split external records by manifest `animal_id` into train and validation;
+2. select one source checkpoint using external validation only;
+3. fine-tune that checkpoint on the same five LYS folds and with the same
+   selected loss/settings as the direct baseline;
+4. calibrate a separate OOF threshold;
+5. compare direct versus external-initialized predictions on identical LYS
+   cases;
+6. reserve the locked LYS test until initialization, threshold, and ensemble
+   are frozen.

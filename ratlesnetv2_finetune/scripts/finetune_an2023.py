@@ -136,7 +136,12 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Comma-separated splits for prediction exports: train,validation,test.",
     )
-    parser.add_argument("--export-prediction-limit", type=int, default=8)
+    parser.add_argument(
+        "--export-prediction-limit",
+        type=int,
+        default=8,
+        help="Maximum cases per split/epoch to export; 0 exports every case.",
+    )
     parser.add_argument("--export-prediction-epochs", default="1,2,5,final")
     parser.add_argument("--max-train-cases", type=int, default=None)
     parser.add_argument("--max-validation-cases", type=int, default=None)
@@ -189,8 +194,8 @@ def main() -> int:
     target_shape = (args.crop_x, args.crop_y, args.crop_z)
     export_splits = _parse_export_splits(args.export_predictions)
     export_epochs = _parse_export_epochs(args.export_prediction_epochs)
-    if export_splits and args.export_prediction_limit < 1:
-        raise ValueError("--export-prediction-limit must be >= 1")
+    if export_splits and args.export_prediction_limit < 0:
+        raise ValueError("--export-prediction-limit must be >= 0")
 
     if args.eval_only:
         summaries = _evaluate_requested_splits(
@@ -927,8 +932,13 @@ def _export_predictions_for_split(
     model.eval()
     out_dir.mkdir(parents=True, exist_ok=True)
     records = []
+    selected_cases = (
+        cases
+        if args.export_prediction_limit == 0
+        else cases[: args.export_prediction_limit]
+    )
     with torch.no_grad():
-        for case in cases[: args.export_prediction_limit]:
+        for case in selected_cases:
             loaded = _load_case(
                 case,
                 target_shape=target_shape,

@@ -99,6 +99,7 @@ RatLesNetV2 branch status:
 RatLesNetV2 docs:
 
 - [../ratlesnetv2_finetune/README.md](../ratlesnetv2_finetune/README.md)
+- [ratlesnetv2_lys_v1_kaggle_workflow.md](ratlesnetv2_lys_v1_kaggle_workflow.md)
 - [ratlesnetv2_finetuning_branch.md](ratlesnetv2_finetuning_branch.md)
 - [ratlesnetv2_external_datasets.md](ratlesnetv2_external_datasets.md)
 

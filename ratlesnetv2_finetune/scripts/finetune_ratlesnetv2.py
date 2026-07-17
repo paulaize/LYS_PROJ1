@@ -74,7 +74,7 @@ def parse_args() -> argparse.Namespace:
         "--metrics-threshold",
         type=float,
         default=0.5,
-        help="Threshold for one-channel binary model outputs. Two-channel outputs use argmax.",
+        help="Lesion-probability threshold used for binary metrics and exported masks.",
     )
     parser.add_argument(
         "--loss",
@@ -181,7 +181,7 @@ def parse_args() -> argparse.Namespace:
         "--export-prediction-limit",
         type=int,
         default=8,
-        help="Maximum cases per split/epoch to export when --export-predictions is set.",
+        help="Maximum cases per split/epoch to export; 0 exports every case.",
     )
     parser.add_argument(
         "--export-prediction-epochs",
@@ -258,8 +258,8 @@ def main() -> int:
         test_data = None
     export_splits = _parse_export_splits(args.export_predictions)
     export_epochs = _parse_export_epochs(args.export_prediction_epochs)
-    if export_splits and args.export_prediction_limit < 1:
-        raise ValueError("--export-prediction-limit must be >= 1 when exporting predictions")
+    if export_splits and args.export_prediction_limit < 0:
+        raise ValueError("--export-prediction-limit must be >= 0 when exporting predictions")
     if args.early_stop_patience is not None and args.early_stop_patience < 1:
         raise ValueError("--early-stop-patience must be >= 1")
     if args.lr_scheduler != "none":
@@ -492,8 +492,25 @@ def main() -> int:
         )
         return 130
 
+    selected_checkpoint = _restore_selected_checkpoint(
+        torch=torch,
+        model=model,
+        run_dir=run_dir,
+        best_state=best_state,
+        device=device,
+    )
     torch.save(model.state_dict(), run_dir / "RatLesNetv2.model")
-    print(now() + f"Saved final model: {run_dir / 'RatLesNetv2.model'}")
+    _write_json(
+        run_dir / "selected_checkpoint.json",
+        {
+            "selection_rule": "best validation Dice; current/last model if unavailable",
+            "source_checkpoint": (
+                str(selected_checkpoint) if selected_checkpoint else "current_model"
+            ),
+            "published_checkpoint": str(run_dir / "RatLesNetv2.model"),
+        },
+    )
+    print(now() + f"Saved selected model: {run_dir / 'RatLesNetv2.model'}")
 
     final_summaries: list[EvaluationSummary] = []
     if val_data is not None:
@@ -940,6 +957,23 @@ def _update_best_checkpoints(
     return improved_dice
 
 
+def _restore_selected_checkpoint(
+    *,
+    torch: Any,
+    model: Any,
+    run_dir: Path,
+    best_state: dict[str, dict[str, Any]],
+    device: Any,
+) -> Path | None:
+    """Restore the validation-selected model before final reports and exports."""
+    record = best_state.get("validation_dice")
+    if record is None:
+        return None
+    checkpoint = run_dir / str(record["filename"])
+    _load_pretrained(torch, model, checkpoint, device=device, strict=True)
+    return checkpoint
+
+
 def _best_checkpoint_record(
     *,
     summary: EvaluationSummary,
@@ -1027,11 +1061,11 @@ def _prediction_to_binary(pred: Any, *, threshold: float) -> np.ndarray:
     if arr.dtype == bool:
         return arr
     if arr.ndim >= 5 and arr.shape[1] > 1:
-        return np.argmax(arr, axis=1) == 1
+        return _class_probabilities(arr, axis=1)[:, 1, ...] >= threshold
     if arr.ndim >= 5 and arr.shape[1] == 1:
         return _score_to_binary(arr[:, 0, ...], threshold=threshold)
     if arr.ndim == 4 and 1 < arr.shape[0] <= 4:
-        return np.argmax(arr, axis=0) == 1
+        return _class_probabilities(arr, axis=0)[1, ...] >= threshold
     if arr.ndim == 4 and arr.shape[0] == 1:
         return _score_to_binary(arr[0, ...], threshold=threshold)
     return _score_to_binary(arr, threshold=threshold)
@@ -1051,11 +1085,11 @@ def _target_to_binary(target: Any) -> np.ndarray:
 def _lesion_probability_map(pred: Any) -> np.ndarray:
     arr = _to_numpy(pred)
     if arr.ndim >= 5 and arr.shape[1] > 1:
-        return np.squeeze(_softmax(arr, axis=1)[:, 1, ...])
+        return np.squeeze(_class_probabilities(arr, axis=1)[:, 1, ...])
     if arr.ndim >= 5 and arr.shape[1] == 1:
         return np.squeeze(_score_to_probability(arr[:, 0, ...]))
     if arr.ndim == 4 and 1 < arr.shape[0] <= 4:
-        return np.squeeze(_softmax(arr, axis=0)[1, ...])
+        return np.squeeze(_class_probabilities(arr, axis=0)[1, ...])
     if arr.ndim == 4 and arr.shape[0] == 1:
         return np.squeeze(_score_to_probability(arr[0, ...]))
     return np.squeeze(_score_to_probability(arr))
@@ -1065,6 +1099,17 @@ def _softmax(value: np.ndarray, *, axis: int) -> np.ndarray:
     shifted = value - np.max(value, axis=axis, keepdims=True)
     exp = np.exp(shifted)
     return exp / np.sum(exp, axis=axis, keepdims=True)
+
+
+def _class_probabilities(value: np.ndarray, *, axis: int) -> np.ndarray:
+    """Return class probabilities without applying softmax twice."""
+    array = np.asarray(value)
+    finite = array[np.isfinite(array)]
+    if finite.size and float(finite.min()) >= 0.0 and float(finite.max()) <= 1.0:
+        totals = np.sum(array, axis=axis)
+        if np.allclose(totals, 1.0, rtol=1e-4, atol=1e-5):
+            return array
+    return _softmax(array, axis=axis)
 
 
 def _to_numpy(value: Any) -> np.ndarray:
@@ -1397,8 +1442,9 @@ def _export_predictions_for_split(
     model.eval()
     out_dir.mkdir(parents=True, exist_ok=True)
     records = []
+    case_count = len(data) if limit == 0 else min(len(data), limit)
     with torch.no_grad():
-        for index in range(min(len(data), limit)):
+        for index in range(case_count):
             x, y, case_id = data[index]
             pred = model(x)[0]
             case_id_text = _case_id_to_str(case_id)
