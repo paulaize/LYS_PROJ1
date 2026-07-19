@@ -1,8 +1,8 @@
 """Lesion segmentation. FIXED INTERFACE — do not change segment_lesion's signature.
 
 v1 backend = "threshold": relative T2 hyperintensity vs the (mirrored) healthy
-hemisphere. v2 backend = "dl": the An et al. 2023 pretrained mouse-T2 model,
-QC'd against manual masks first (it false-positives on lesion-free brains).
+hemisphere. A future "dl" backend must use a frozen, independently validated
+model and retain the same review-first interface.
 """
 from __future__ import annotations
 
@@ -37,10 +37,9 @@ def segment_lesion(volume: np.ndarray,
         )
     if method == "dl":
         raise NotImplementedError(
-            "DL backend (An et al. 2023) is Milestone 2. Obtain/QC the model, "
-            "set config mri.dl.weights_path, then implement _dl_backend() here. "
-            "Keep this signature. QC vs manual masks before trusting outputs; "
-            "apply min_lesion_mm3 to suppress control false-positives."
+            "The production DL backend is not enabled. Freeze and independently "
+            "validate a model, record its weights/version in config, and keep this "
+            "review-first interface when implementing it."
         )
     raise ValueError(f"Unknown segmentation method: {method!r}")
 

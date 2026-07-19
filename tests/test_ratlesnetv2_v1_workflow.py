@@ -24,6 +24,9 @@ from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
     _lesion_probability_map,
     _prediction_to_binary,
 )
+from ratlesnetv2_finetune.scripts.normalize_prepared_dataset import (
+    normalize_prepared_dataset,
+)
 from ratlesnetv2_finetune.scripts.package_prepared_dataset import (
     package_prepared_dataset,
 )
@@ -107,6 +110,79 @@ def _reviewed_metadata(rows: list[dict[str, object]]) -> list[dict[str, object]]
             }
         )
     return result
+
+
+def _make_kaggle_altered_dataset(root: Path, *, alias_matches: bool = True) -> None:
+    rows = []
+    affine = np.diag([*SPACING, 1.0])
+    for index, case_id in enumerate(("plain_case", "truncated_gzip_case")):
+        case_dir = root / "train" / "LYS" / "mixed" / case_id
+        case_dir.mkdir(parents=True)
+        scan = np.arange(8 * 9 * 3, dtype=np.float32).reshape(8, 9, 3, 1)
+        label = np.zeros((8, 9, 3), dtype=np.uint8)
+        label[2:4, 3:6, index : index + 1] = 1
+        alias = label.copy()
+        if not alias_matches and index == 1:
+            alias[0, 0, 0] = 1
+        nib.save(nib.Nifti1Image(scan, affine), case_dir / "scan.nii")
+        if index == 0:
+            nib.save(nib.Nifti1Image(label, affine), case_dir / "scan_lesionIAM.nii")
+            nib.save(nib.Nifti1Image(alias, affine), case_dir / "scan_lesion.nii")
+        else:
+            iam_staged = root / "iam.nii.gz"
+            alias_staged = root / "alias.nii.gz"
+            nib.save(nib.Nifti1Image(label, affine), iam_staged)
+            nib.save(nib.Nifti1Image(alias, affine), alias_staged)
+            iam_staged.replace(case_dir / "scan_lesionIAM.n")
+            alias_staged.replace(case_dir / "scan_lesion.nii.g")
+        rows.append(
+            {
+                "case_id": case_id,
+                "animal_id": case_id,
+                "split": "train",
+                "study": "LYS",
+                "timepoint": "mixed",
+                "case_dir": str(case_dir),
+                "scan_path": str(case_dir / "scan.nii"),
+                "label_path": str(case_dir / "scan_lesionIAM.nii"),
+            }
+        )
+    _write_csv(root / "manifest.csv", rows)
+
+
+def test_normalize_prepared_dataset_recovers_plain_and_truncated_gzip(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _make_kaggle_altered_dataset(source)
+
+    result = normalize_prepared_dataset(
+        source_root=source,
+        output_base=tmp_path / "normalized",
+        dataset_name="Synthetic",
+        expected_cases=2,
+    )
+
+    assert len(list(result.rglob("scan.nii.gz"))) == 2
+    assert len(list(result.rglob("scan_lesionIAM.nii.gz"))) == 2
+    assert len(list(result.rglob("scan_lesion.nii.gz"))) == 2
+    report = _read_csv(result / "normalization_report.csv")
+    assert {row["source_iam_transport"] for row in report} == {"plain", "gzip"}
+    assert {row["iam_alias_identical"] for row in report} == {"True"}
+
+
+def test_normalize_prepared_dataset_rejects_mask_alias_disagreement(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _make_kaggle_altered_dataset(source, alias_matches=False)
+
+    with pytest.raises(RuntimeError, match="IAM and alias lesion masks are not identical"):
+        normalize_prepared_dataset(
+            source_root=source,
+            output_base=tmp_path / "normalized",
+            dataset_name="Synthetic",
+            expected_cases=2,
+        )
+    assert not (tmp_path / "normalized" / "Synthetic").exists()
 
 
 def test_two_class_predictions_honor_probability_threshold_without_double_softmax():

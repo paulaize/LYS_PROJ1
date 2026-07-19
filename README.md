@@ -1,158 +1,99 @@
-# LYS_PROJ1 stroke MRI + IHC pipeline
+# LYS mouse T2w lesion-model training
 
-Semi-automated analysis for a preclinical ischemic-stroke study in mice:
+Branch `dl-ratlesnetv2-finetune` develops and selects a RatLesNetV2 model for
+mouse T2-weighted ischemic-lesion segmentation using human-reviewed LYS masks.
+The inherited MRI/IHC pipeline remains in the repository for compatibility and
+context, but it is not the active development target on this branch.
 
-- **MRI:** Bruker T2 RARE -> NIfTI -> human-reviewed lesion volume.
-- **IHC:** Olympus `.vsi` fluorescence -> QuPath/Python -> IgG-FITC positive-area readouts.
-- **Later:** independent MRI->Allen and IHC->Allen registration, compartments, cell-level measurements, and a tidy table for R.
+Read [AGENTS.md](AGENTS.md) before changing code.
 
-Read [AGENTS.md](AGENTS.md) first. It is the operating brief for agents and humans: data rules, domain facts, v1 scope, and definition of done.
+## Active experiment
 
-## Current Status
+```text
+upstream rat checkpoint
+  -> direct LYS Tversky, folds 0-4
+  -> direct LYS CE+Dice, folds 0-4
+  -> paired OOF comparison and loss selection
 
-The active production target is **v1 thin spine**:
+upstream rat checkpoint
+  -> external mouse adaptation selected on external validation only
+  -> selected LYS setup, folds 0-4
+  -> paired OOF direct-versus-external comparison
 
-- one test animal: `BD_08_5D`
-- no atlas, no deep learning, no compartments, no batch processing
-- MRI lesion volume from a reviewed/corrected mask
-- IHC IgG-FITC positive area inside a reviewed `tissue_v1` ROI
-- one minimal joined CSV
+freeze five models + OOF threshold + mean-probability ensemble
+  -> evaluate the locked LYS test once
+```
 
-The automatic MRI lesion mask is only a draft. For `BD_08_5D` it can target bright peripheral artifact instead of the expected image-right isocortical lesion. The corrected `work/<animal_id>/lesion_corrected.nii.gz` mask is the source of truth for v1.
+The exact Kaggle cells and decision gates are in
+[docs/ratlesnetv2_lys_v1_kaggle_workflow.md](docs/ratlesnetv2_lys_v1_kaggle_workflow.md).
+External-source inclusion and provenance are in
+[docs/ratlesnetv2_external_datasets.md](docs/ratlesnetv2_external_datasets.md).
 
-The current execution checklist is [docs/v1_next_session_todo.md](docs/v1_next_session_todo.md).
+## Current datasets
 
-## Documentation Map
+- `LYS_T2w_manual_v1`: 258 corrected target cases, expected spacing
+  `0.07 x 0.07 x 0.5 mm`.
+- `External_Mouse_T2w_manual_LSP_SI_v0`: 426 manual external records used only
+  as a controlled initialization comparator.
 
-- [AGENTS.md](AGENTS.md): canonical rules and facts.
-- [docs/v1_next_session_todo.md](docs/v1_next_session_todo.md): active v1 task list.
-- [docs/development_roadmap.md](docs/development_roadmap.md): milestone plan after v1.
-- [docs/MRI_IHC_pipeline_plan.md](docs/MRI_IHC_pipeline_plan.md): compact full-pipeline design reference.
-- [docs/MRI_IHC_pipeline_plan_DL.md](docs/MRI_IHC_pipeline_plan_DL.md): later DL/human-in-loop design.
-- [ratlesnetv2_finetune/README.md](ratlesnetv2_finetune/README.md): RatLesNetV2 local/Kaggle command runbook.
-- [docs/ratlesnetv2_finetuning_branch.md](docs/ratlesnetv2_finetuning_branch.md): RatLesNetV2 branch strategy and current baseline.
-- [docs/ratlesnetv2_external_datasets.md](docs/ratlesnetv2_external_datasets.md): public mouse dataset policy for RatLesNetV2 adaptation.
+Kaggle may alter NIfTI suffixes while exposing dataset contents. The active
+workflow normalizes inputs by payload type under `/kaggle/working`; never
+rename files under `/kaggle/input`.
 
-## Environment
+## Local checks
 
-Use the existing conda environment:
+Use the existing `lys-bbb` environment:
 
 ```bash
 make env-check
-make test
 make lint
-```
-
-The default environment name is `lys-bbb`. `env/environment.yml` is a reference/export target, not a request to create a new environment.
-
-Small dev additions, only if needed:
-
-```bash
-conda env update -n lys-bbb -f env/lys-bbb-dev-additions.yml
-```
-
-## v1 Quickstart
-
-```bash
-# Check the environment and tests.
-make env-check
 make test
-
-# Convert configured Bruker scan 2 / reco 1 to NIfTI under work/.
-make convert-mri CONFIG=config/animals/BD_08_5D.yml
-
-# Technical run only: writes an unreviewed draft mask flagged needs_human_review.
-make run CONFIG=config/animals/BD_08_5D.yml RUN_ARGS=--no-mask-editor
-
-# Real v1 MRI run: opens napari for mask review/correction.
-make run CONFIG=config/animals/BD_08_5D.yml
 ```
 
-Optional IHC ingest, after a valid QuPath export exists:
+Useful training-data commands:
 
 ```bash
-make run CONFIG=config/animals/BD_08_5D.yml IHC=work/BD_08_5D/ihc.csv
+make ratlesnetv2-audit RUN_ARGS="--help"
+make ratlesnetv2-grouped-cv RUN_ARGS="--help"
+make ratlesnetv2-split-prepared RUN_ARGS="--help"
+make ratlesnetv2-normalize RUN_ARGS="--help"
+make ratlesnetv2-calibrate-threshold RUN_ARGS="--help"
+make ratlesnetv2-evaluate-ensemble RUN_ARGS="--help"
 ```
 
-Important: `RUN_ARGS=--no-mask-editor` is for technical runs only. It overwrites `lesion_corrected.nii.gz` with the draft and flags the row as `needs_human_review`.
+The Kaggle guide calls the trainer and evaluation utilities directly with
+fully recorded options. Local preparation/rebuild commands are summarized in
+[ratlesnetv2_finetune/README.md](ratlesnetv2_finetune/README.md).
 
-## IHC Threshold Work
-
-No approved IgG-FITC positivity threshold exists yet. The pipeline must create candidate thresholds from configured controls/image statistics, generate review artifacts, and require human sign-off before final positive-area rows are accepted.
-
-Current control animal: `C6S5`.
-
-Useful commands:
-
-```bash
-# Build the exploratory calibration manifest.
-make calibrate-ihc CONFIG=config/animals/BD_08_5D.yml
-
-# Dry-run configured threshold-sweep commands.
-make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml
-
-# Diagnose one target section before pixel work.
-make ihc-diagnose CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --target-only --limit 1 --run --timeout-seconds 180"
-
-# Run one target sweep, then the matching control sweep.
-make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --target-only --limit 1 --run --timeout-seconds 600"
-make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A --section section_01 --controls-only --limit 1 --run --append"
-```
-
-The sweep CSV is exploratory and must remain flagged as not final. Final measurement export still requires a reviewed `tissue_v1` ROI and an approved threshold.
-
-## RatLesNetV2 Branch
-
-Branch `dl-ratlesnetv2-finetune` is an independent MRI lesion DL track. It does not replace v1. It consumes human-reviewed masks and produces draft masks that still require human review before scientific volume calculations.
-
-Current model strategy:
+## Active package
 
 ```text
-main baseline: rat pretrained -> LYS fine-tuning
-comparator:    rat pretrained -> external mouse adaptation -> LYS fine-tuning
+ratlesnetv2_finetune/
+├── dataset.py                         # canonical prepared-folder writer
+├── source_folders.py                  # local source-plan support
+├── roiset_to_nifti_mask.py            # Fiji RoiSet conversion
+├── configs/                            # portable templates; local plans ignored
+└── scripts/
+    ├── normalize_prepared_dataset.py  # Kaggle filename/payload normalization
+    ├── audit_prepared_dataset.py      # scan/mask QC and overlays
+    ├── create_grouped_cv.py           # locked test + five OOF folds
+    ├── split_prepared_dataset.py      # external train/validation split
+    ├── finetune_ratlesnetv2.py        # active trainer/exporter
+    ├── calibrate_probability_threshold.py
+    ├── evaluate_probability_ensemble.py
+    └── ...                             # dataset rebuild/provenance utilities
 ```
 
-The direct LYS run is now the baseline to beat: validation Dice reached about `0.53` by epoch 10 without background collapse. Continue from `best_by_validation_dice.model`, use validation overlays, reduce LR on plateau, and do not touch the held-out LYS test split until the final strategy is chosen.
+Generated datasets and runs belong under `work/`, `outputs/`, or
+`/kaggle/working`; they are not committed.
 
-Kaggle is currently the preferred free GPU runtime. The command runbook is [ratlesnetv2_finetune/README.md](ratlesnetv2_finetune/README.md).
+## Scientific boundary
 
-## Make Targets
+The model is intended to reduce manual lesion-drawing burden. Until a frozen
+version is independently validated and the review policy changes explicitly,
+its predictions remain drafts and human-reviewed masks remain the scientific
+source of truth for lesion volume.
 
-| Target | Purpose |
-|---|---|
-| `make env-check` | check core environment imports/tools |
-| `make test` | run pytest with plugin autoload disabled |
-| `make lint` | run Ruff |
-| `make convert-mri CONFIG=...` | Bruker T2 scan 2 -> NIfTI |
-| `make run CONFIG=...` | run one v1 animal |
-| `make calibrate-ihc CONFIG=...` | write exploratory threshold manifest |
-| `make ihc-diagnose CONFIG=... RUN_ARGS="..."` | QuPath/Bio-Formats metadata diagnostic |
-| `make ihc-threshold-sweeps CONFIG=... RUN_ARGS="..."` | dry-run or execute exploratory threshold sweeps |
-| `make ratlesnetv2-prepare RATLESNET_CONFIG=...` | prepare RatLesNetV2 folder contract locally |
-| `make ratlesnetv2-split-prepared RUN_ARGS="..."` | split prepared RatLesNetV2 dataset |
-| `make ratlesnetv2-cloud-plan RATLESNET_CONFIG=...` | print cloud training commands |
-
-## Layout
-
-```text
-AGENTS.md, CLAUDE.md       # operating brief + Claude pointer
-config/                    # global pipeline + per-animal configs
-src/mri/                   # io, preprocess, segment, edit, edema, volume
-src/ihc/                   # ingest/calibrate + QuPath Groovy scripts
-src/atlas/                 # later milestones
-src/compartments.py        # later milestones
-src/join.py                # later milestones
-scripts/                   # command wrappers and diagnostics
-ratlesnetv2_finetune/      # independent RatLesNetV2 branch tooling
-legacy/context_code/       # reference-only old scripts
-
-data/                      # gitignored read-only inputs
-work/                      # gitignored intermediates
-outputs/                   # gitignored final deliverables
-```
-
-## Interpretation Note
-
-The IHC marker/readout is named **IgG-FITC** in code and outputs. Specificity is resolved: the secondary is anti-human IgG, and LYS241 is humanized Glunomab, so IgG-FITC is interpreted as LYS241-associated signal through provenance flags.
-
-This does not set the positivity threshold. Threshold calibration and sign-off remain open v1 gates.
+The locked test is not a development dashboard. It is opened only after the
+loss, initialization, five checkpoints, OOF threshold, ensemble, and
+postprocessing rule are frozen.

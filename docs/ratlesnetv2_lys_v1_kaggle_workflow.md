@@ -123,25 +123,13 @@ print("Upstream RatLesNet checkpoint:", RAT_PRETRAINED)
 ## Cell 2 — locate, validate, and normalize both prepared datasets
 
 This reads `/kaggle/input` and extracts only into `/kaggle/working` when
-Kaggle has not already exposed the archive contents. It then builds a clean,
-canonical copy under `/kaggle/working/normalized_inputs`.
-
-This normalization is required even when the sidebar names look reasonable.
-It detects plain versus gzip data from the payload rather than the suffix,
-forces every complete array to load, checks scan/mask geometry, requires the
-two packaged lesion-mask copies to be identical, and verifies that saving to
-canonical `.nii.gz` did not change the arrays or affines. A
-`normalization_report.csv` is retained for provenance.
+Kaggle has not already exposed the archive contents. The normalizer detects
+plain versus gzip data from the payload rather than the suffix, forces every
+array to load, checks scan/mask geometry and label aliases, and writes
+canonical `.nii.gz` inputs with a provenance report.
 
 ```python
-import csv
-import os
-import shutil
 import tarfile
-import tempfile
-
-import nibabel as nib
-import numpy as np
 
 
 def locate_or_extract_prepared_dataset(dataset_name: str) -> Path:
@@ -169,44 +157,6 @@ def locate_or_extract_prepared_dataset(dataset_name: str) -> Path:
 
 
 NORMALIZED_BASE = WORK / "normalized_inputs"
-NORMALIZED_BASE.mkdir(parents=True, exist_ok=True)
-NORMALIZATION_TMP = WORK / "nifti_normalization_tmp"
-NORMALIZATION_TMP.mkdir(parents=True, exist_ok=True)
-
-
-def payload_transport(path: Path) -> str:
-    with path.open("rb") as handle:
-        magic = handle.read(2)
-    return "gzip" if magic == b"\x1f\x8b" else "plain"
-
-
-def require_one(paths, *, role: str, case_id: str) -> Path:
-    paths = list(paths)
-    if len(paths) != 1:
-        raise RuntimeError(
-            f"{case_id}: expected exactly one {role}; found "
-            f"{[path.name for path in paths]}"
-        )
-    return paths[0]
-
-
-def stage_with_correct_extension(
-    source: Path,
-    temporary_dir: Path,
-    staged_name: str,
-) -> tuple[Path, str]:
-    transport = payload_transport(source)
-    suffix = ".nii.gz" if transport == "gzip" else ".nii"
-    staged = temporary_dir / f"{staged_name}{suffix}"
-    shutil.copyfile(source, staged)
-    return staged, transport
-
-
-def full_array(image, *, source: Path) -> np.ndarray:
-    data = np.asarray(image.dataobj)
-    if not np.isfinite(data).all():
-        raise RuntimeError(f"Non-finite values found in {source}")
-    return data
 
 
 def normalize_prepared_dataset(
@@ -215,208 +165,23 @@ def normalize_prepared_dataset(
     dataset_name: str,
     expected_cases: int,
 ) -> Path:
-    final_root = NORMALIZED_BASE / dataset_name
-    building_root = NORMALIZED_BASE / f".{dataset_name}.building"
-
-    if final_root.exists():
-        scans = list(final_root.rglob("scan.nii.gz"))
-        labels = list(final_root.rglob("scan_lesionIAM.nii.gz"))
-        aliases = list(final_root.rglob("scan_lesion.nii.gz"))
-        assert len(scans) == expected_cases, len(scans)
-        assert len(labels) == expected_cases, len(labels)
-        assert len(aliases) == expected_cases, len(aliases)
-        assert (final_root / "manifest.csv").is_file()
-        assert (final_root / "normalization_report.csv").is_file()
-        print("Using existing normalized dataset:", final_root)
-        return final_root
-
-    # Only an incomplete disposable build is removed on a rerun.
-    if building_root.exists():
-        shutil.rmtree(building_root)
-    building_root.mkdir(parents=True)
-
-    manifest_path = source_root / "manifest.csv"
-    with manifest_path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    assert len(rows) == expected_cases, (dataset_name, len(rows), expected_cases)
-
-    fieldnames = list(rows[0])
-    for column in ("case_dir", "scan_path", "label_path"):
-        if column not in fieldnames:
-            fieldnames.append(column)
-
-    output_rows = []
-    report_rows = []
-
-    for index, row in enumerate(rows, start=1):
-        case_id = row["case_id"]
-        relative_case = (
-            Path(row["split"])
-            / row["study"]
-            / row["timepoint"]
-            / case_id
-        )
-        source_case = source_root / relative_case
-        destination_case = building_root / relative_case
-        final_case = final_root / relative_case
-
-        if not source_case.is_dir():
-            raise FileNotFoundError(
-                f"{case_id}: missing source case directory {source_case}"
-            )
-
-        files = [path for path in source_case.iterdir() if path.is_file()]
-        source_scan = require_one(
-            (
-                path
-                for path in files
-                if path.name in {"scan.nii", "scan.nii.gz"}
-            ),
-            role="scan",
-            case_id=case_id,
-        )
-        source_iam = require_one(
-            (path for path in files if path.name.startswith("scan_lesionIAM.")),
-            role="IAM lesion mask",
-            case_id=case_id,
-        )
-        source_alias = require_one(
-            (path for path in files if path.name.startswith("scan_lesion.")),
-            role="lesion-mask alias",
-            case_id=case_id,
-        )
-        destination_case.mkdir(parents=True)
-
-        with tempfile.TemporaryDirectory(
-            dir=NORMALIZATION_TMP,
-            prefix=f"{index:04d}_",
-        ) as temporary:
-            temporary = Path(temporary)
-            staged_scan, scan_transport = stage_with_correct_extension(
-                source_scan, temporary, "source_scan"
-            )
-            staged_iam, iam_transport = stage_with_correct_extension(
-                source_iam, temporary, "source_iam"
-            )
-            staged_alias, alias_transport = stage_with_correct_extension(
-                source_alias, temporary, "source_alias"
-            )
-
-            scan_image = nib.load(str(staged_scan))
-            iam_image = nib.load(str(staged_iam))
-            alias_image = nib.load(str(staged_alias))
-            scan_data = full_array(scan_image, source=source_scan)
-            iam_data = full_array(iam_image, source=source_iam)
-            alias_data = full_array(alias_image, source=source_alias)
-
-            if scan_data.ndim != 4 or scan_data.shape[-1] != 1:
-                raise RuntimeError(
-                    f"{case_id}: expected scan shape (X,Y,Z,1); "
-                    f"found {scan_data.shape}"
-                )
-            if iam_data.shape != scan_data.shape[:3]:
-                raise RuntimeError(
-                    f"{case_id}: scan/mask shape mismatch: "
-                    f"{scan_data.shape} versus {iam_data.shape}"
-                )
-            if alias_data.shape != iam_data.shape:
-                raise RuntimeError(
-                    f"{case_id}: IAM/alias shape mismatch: "
-                    f"{iam_data.shape} versus {alias_data.shape}"
-                )
-            if not np.array_equal(iam_data, alias_data):
-                raise RuntimeError(
-                    f"{case_id}: IAM and alias lesion masks are not identical"
-                )
-            unique_values = np.unique(iam_data)
-            if not np.all(np.isin(unique_values, (0, 1))):
-                raise RuntimeError(
-                    f"{case_id}: non-binary lesion mask values: "
-                    f"{unique_values[:20]}"
-                )
-            for role, image in (
-                ("IAM mask", iam_image),
-                ("alias mask", alias_image),
-            ):
-                if not np.allclose(
-                    scan_image.affine,
-                    image.affine,
-                    rtol=0,
-                    atol=1e-5,
-                ):
-                    raise RuntimeError(f"{case_id}: scan/{role} affine mismatch")
-
-            temporary_outputs = {
-                "scan.nii.gz": (scan_image, scan_data),
-                "scan_lesionIAM.nii.gz": (iam_image, iam_data),
-                "scan_lesion.nii.gz": (alias_image, alias_data),
-            }
-            for filename, (image, expected_data) in temporary_outputs.items():
-                temporary_output = temporary / filename
-                nib.save(image, str(temporary_output))
-                reloaded = nib.load(str(temporary_output))
-                reloaded_data = np.asarray(reloaded.dataobj)
-                if not np.array_equal(reloaded_data, expected_data):
-                    raise RuntimeError(
-                        f"{case_id}: data changed while writing {filename}"
-                    )
-                if not np.allclose(
-                    reloaded.affine,
-                    image.affine,
-                    rtol=0,
-                    atol=1e-7,
-                ):
-                    raise RuntimeError(
-                        f"{case_id}: affine changed while writing {filename}"
-                    )
-                os.replace(temporary_output, destination_case / filename)
-
-        output_row = dict(row)
-        output_row["case_dir"] = str(final_case)
-        output_row["scan_path"] = str(final_case / "scan.nii.gz")
-        output_row["label_path"] = str(final_case / "scan_lesionIAM.nii.gz")
-        output_rows.append(output_row)
-        report_rows.append(
-            {
-                "case_id": case_id,
-                "source_scan_name": source_scan.name,
-                "source_scan_transport": scan_transport,
-                "source_iam_name": source_iam.name,
-                "source_iam_transport": iam_transport,
-                "source_alias_name": source_alias.name,
-                "source_alias_transport": alias_transport,
-                "scan_shape": str(tuple(scan_data.shape)),
-                "mask_shape": str(tuple(iam_data.shape)),
-                "iam_alias_identical": True,
-            }
-        )
-
-        if index % 25 == 0 or index == expected_cases:
-            print(f"{dataset_name}: normalized {index}/{expected_cases}")
-
-    with (building_root / "manifest.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(output_rows)
-    with (building_root / "normalization_report.csv").open(
-        "w", newline=""
-    ) as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(report_rows[0]))
-        writer.writeheader()
-        writer.writerows(report_rows)
-
-    assert len(list(building_root.rglob("scan.nii.gz"))) == expected_cases
-    assert (
-        len(list(building_root.rglob("scan_lesionIAM.nii.gz")))
-        == expected_cases
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ratlesnetv2_finetune.scripts.normalize_prepared_dataset",
+            "--input", str(source_root),
+            "--output-base", str(NORMALIZED_BASE),
+            "--dataset-name", dataset_name,
+            "--expected-cases", str(expected_cases),
+        ],
+        cwd=PROJECT,
+        check=True,
     )
-    assert (
-        len(list(building_root.rglob("scan_lesion.nii.gz")))
-        == expected_cases
-    )
-    building_root.rename(final_root)
-    print("Normalized dataset written:", final_root)
-    return final_root
+    result = NORMALIZED_BASE / dataset_name
+    assert (result / "manifest.csv").is_file()
+    assert (result / "normalization_report.csv").is_file()
+    return result
 
 
 LYS_SOURCE_ROOT = locate_or_extract_prepared_dataset("LYS_T2w_manual_v1")

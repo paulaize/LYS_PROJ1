@@ -4,7 +4,7 @@
 # adding local source folders. local_*.yml files are gitignored because they
 # may contain absolute paths on Paul's machine.
 
-dataset_name: "LYS_T2w_manual_v0"
+dataset_name: "LYS_T2w_manual_TEMPLATE"
 output_root: "work/ratlesnetv2_finetune/datasets"
 
 preprocessing:

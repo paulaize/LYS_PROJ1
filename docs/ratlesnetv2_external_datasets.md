@@ -1,216 +1,102 @@
-# RatLesNetV2 External Mouse Datasets
+# External mouse data for RatLesNetV2
 
-Last updated: 2026-07-15
+Last reviewed: 2026-07-15
 
-This document defines which public mouse MRI data can be used for RatLesNetV2
-adaptation. It is a reference for dataset selection and provenance, not the
-training runbook. The active training protocol lives in
-[ratlesnetv2_lys_v1_kaggle_workflow.md](ratlesnetv2_lys_v1_kaggle_workflow.md).
+External mouse data are a controlled initialization comparator. The source
+checkpoint is selected using external validation only, then fine-tuned on the
+same LYS folds/settings as the direct baseline. Only paired LYS OOF evidence
+can show whether external adaptation helped. Held-out LYS cases provide the
+final performance claim.
 
-## Current Decision
+## Included sources
 
-Direct rat-pretrained -> LYS fine-tuning is the main baseline. Public mouse
-adaptation is a controlled comparator. Its source checkpoint must be selected
-using external train/validation only, then fine-tuned with the selected loss on
-the same five LYS development folds as the direct baseline. Keep it only if the
-paired OOF comparison shows a repeatable downstream LYS benefit.
+| Source | Record | Included native manual data |
+|---|---|---|
+| `An2022` | <https://zenodo.org/records/6379879> | T2w scans with manual lesion masks |
+| `Knab2025` | <https://zenodo.org/records/14709930> | unique cases not already in An2022 |
+| `Koch2017` | <https://zenodo.org/records/842677> | native manual scan/mask pairs |
 
-External data are never the final target-domain test. Held-out LYS cases are
-the only valid final performance claim.
+`Mulder2017` is not in the current prepared set. An2022 already contains a
+Mulder subset, so adding it later requires explicit deduplication and a new
+dataset version.
 
-## Sources
+## Prepared comparator
 
-| Short name | Record | Useful contents | Current use |
-|---|---|---|---|
-| `An2022` | <https://zenodo.org/records/6379879> | Mouse T2w NIfTI scans, manual lesion masks | Main public mouse source |
-| `Knab2025` | <https://zenodo.org/records/14709930> | Mouse T2w scans, native and atlas-space masks | Use unique native manual cases not already in `An2022` |
-| `Koch2017` | <https://zenodo.org/records/842677> | Mouse stroke T2w scans, manual masks, atlas copies | Use native manual cases after QC |
-| `Mulder2017` | <https://datadryad.org/dataset/doi:10.5061/dryad.1m528> | Mouse tMCAO MRI, ImageJ/manual segmentations | Later optional expansion; extra conversion/QC needed |
+Archive: `External_Mouse_T2w_manual_LSP_SI_v0.tar.gz`
 
-## Current Prepared External Source
+The manifest contains 426 distinct `animal_id` values:
 
-Use:
-
-```text
-/Volumes/Untitled/external_datasets/ratlesnetv2_clean_source_LSP_SI_flipped/
-```
-
-This folder is the current non-Mulder external source after:
-
-1. cleaning native scan/mask pairs
-2. relabeling headers to `LSP`
-3. applying the confirmed superior/inferior voxel-array flip
-
-Current prepared count: 426 scan/mask pairs.
-
-The current upload archive is
-`External_Mouse_T2w_manual_LSP_SI_v0.tar.gz`. Its prepared manifest contains
-426 distinct `animal_id` values. The active Kaggle workflow uses those IDs for
-an external-only 80/20 train/validation split and records the limitation that
-richer source-animal metadata is not currently available.
-
-| Dataset | Shape | Count |
+| Dataset | Shape | Cases |
 |---|---:|---:|
-| `An2022` | `256 x 256 x 32` | 331 |
-| `Knab2025` | `256 x 256 x 32` | 45 |
-| `Knab2025` | `192 x 192 x 32` | 35 |
-| `Koch2017` | `256 x 256 x 32` | 15 |
+| An2022 | `256 x 256 x 32` | 331 |
+| Knab2025 | `256 x 256 x 32` | 45 |
+| Knab2025 | `192 x 192 x 32` | 35 |
+| Koch2017 | `256 x 256 x 32` | 15 |
 
-All outputs are `LSP`, scan/mask affines match, shapes are unchanged, masks are
-binary, lesion voxel counts are unchanged, and every output is exactly the
-axis-1 flip of the corresponding `ratlesnetv2_clean_source_LSP_oriented/`
-input. Keep representative visual QC before relying on a run.
+The active workflow makes an external-only 80/20 split grouped by manifest
+`animal_id`. With seed `20260715`, expected train/validation counts are 341/85.
+Richer source-animal metadata is not currently available; record that
+limitation when interpreting the comparison.
 
-## Geometry
+## Inclusion policy
 
-| Dataset | Representative shape | Representative voxel size | Notes |
-|---|---:|---:|---|
-| `LYS` | `256 x 256 x 18` | `0.07 x 0.07 x 0.5 mm` | Target domain |
-| `An2022` | `256 x 256 x 32` | `0.1 x 0.1 x 0.5 mm` | Native T2w |
-| `Knab2025` | `256 x 256 x 32` | `0.1 x 0.1 x 0.5 mm` | Some duplicate Charite cases |
-| `Koch2017` | `256 x 256 x 32` | about `0.1 x 0.1 x 0.5 mm` | Slight in-plane rotation in sample affine |
-| `Mulder2017` | `128 x 128 x 16` | `0.117188 x 0.117188 x 0.5 mm` | Later optional; not geometry-matched |
+Include only:
 
-Implications:
+- manual labels;
+- native-space scan/mask pairs;
+- one record per unique image/case;
+- binary non-empty lesion masks;
+- matching scan/mask shapes and affines.
 
-- public mouse data can support mouse-domain adaptation
-- LYS fine-tuning and held-out LYS validation remain mandatory
-- do not report public validation as LYS performance
-- do not blindly resample everything without a deliberate training-grid choice
+Exclude automated masks, atlas-space masks, duplicate native/cropped copies,
+and known cross-dataset duplicates.
 
-## Inclusion Rules
+Specific choices:
 
-Use for training:
+- An2022: `t2.nii` with `masklesion_manual.nii`.
+- Knab2025: native `t2.nii` with `masklesion.nii` only when absent from An2022.
+- Koch2017: native `all/dat` pairs; do not mix the cropped copy as an
+  independent case.
 
-- manual labels only
-- native-space images/masks only
-- one label per image
-- deduplicated cases
-- positive lesion masks unless no-lesion controls are deliberately included
+## Geometry and orientation
 
-Skip as ground truth:
+| Dataset | Typical spacing (mm) | Role |
+|---|---:|---|
+| LYS | `0.07 x 0.07 x 0.5` | target domain |
+| An2022/Knab2025/Koch2017 | about `0.1 x 0.1 x 0.5` | source adaptation |
 
-- automated masks
-- atlas-space masks such as `x_masklesion.nii`
-- duplicate copies of the same animal/image
-- cropped/native duplicates unless a run explicitly studies cropping
+The current external version is header-relabelled to `LSP` and then receives
+the visually confirmed superior/inferior voxel-array flip. Scan/mask arrays are
+flipped together; affines continue to match; mask voxel counts remain
+unchanged. Keep representative visual QC and do not introduce resampling as an
+unrecorded cleanup step.
 
-Dataset-specific rules:
-
-- `An2022`: use Charite `t2.nii` with `masklesion_manual.nii`.
-- `Knab2025`: use native `t2.nii` with `masklesion.nii` only when the case is
-  not already present in `An2022`.
-- `Koch2017`: use `all/dat` native pairs; treat `mcao_cropped_to_20slices` as a
-  separate optional experiment.
-- `Mulder2017`: use later only if more public data are needed; choose one
-  manual observer for training and keep the other for inter-rater/QC.
-
-## Known Overlap
-
-| Pair | Policy |
-|---|---|
-| `An2022` vs `Mulder2017` | `An2022` includes a Mulder subset. Do not include both. |
-| `An2022` vs `Knab2025` | 73 usable Knab native case IDs overlap with An Charite cases. Keep one copy. |
-| `Koch2017` vs others | No exact case-ID overlap found in inspected indices; still keep provenance/hash checks. |
-| `Koch2017` internal | Native and cropped MCAO folders can contain the same animal. Do not treat both as independent by default. |
-
-## Cleaning Commands
-
-Download and clean external archives outside git:
+Rebuild commands, with paths supplied locally rather than committed:
 
 ```bash
-make ratlesnetv2-download-external RUN_ARGS="--output-root /Volumes/Untitled/external_datasets --include-mulder --delete-archives"
-```
+make ratlesnetv2-download-external \
+  RUN_ARGS="--output-root <external-root> --delete-archives"
 
-Create the LSP header-normalized intermediate:
-
-```bash
 make ratlesnetv2-orient-external-lsp \
-  RUN_ARGS="--external-root /Volumes/Untitled/external_datasets --target-axcodes LSP --overwrite"
-```
+  RUN_ARGS="--external-root <external-root> --target-axcodes LSP --overwrite"
 
-Create the current S/I-flipped source:
-
-```bash
 make ratlesnetv2-flip-external-si \
-  RUN_ARGS="--external-root /Volumes/Untitled/external_datasets --output-source-root /Volumes/Untitled/external_datasets/ratlesnetv2_clean_source_LSP_SI_flipped --output-manifest /Volumes/Untitled/external_datasets/manifests/external_dataset_manifest_LSP_SI_flipped.csv --all --overwrite"
+  RUN_ARGS="--external-root <external-root> \
+  --output-source-root <flipped-source-root> \
+  --output-manifest <manifest.csv> --all --overwrite"
 ```
 
-## Training Set Policy
+## Required provenance
 
-Public mouse adaptation set:
+Keep, where available:
 
 ```text
-An2022 manual native cases
-+ Knab2025 unique native manual cases
-+ Koch2017 native manual cases
+source_dataset, source_record_url, source_case_id, animal_id,
+study, timepoint, species, stroke_model, label_source, label_observer,
+image_space, shape, spacing_mm, affine_hash, mask_voxels,
+lesion_volume_mm3, duplicate_of, qc_flag
 ```
 
-Optional later:
-
-```text
-+ full Mulder2017 primary-observer manual cases
-- An2022 Mulder subset duplicates
-```
-
-LYS fine-tuning set:
-
-```text
-LYS T2w scans with human-reviewed native lesion masks
-```
-
-Final evaluation:
-
-```text
-held-out LYS test only, after strategy selection
-```
-
-## Required Provenance
-
-Every imported case should carry:
-
-```text
-source_dataset
-source_record_url
-source_case_id
-study
-timepoint
-species
-stroke_model
-scan_path
-mask_path
-label_source
-label_observer
-image_space
-shape
-spacing_mm
-affine_hash
-mask_voxels
-lesion_volume_mm3
-duplicate_of
-qc_flag
-```
-
-Default training filter:
-
-```text
-label_source == manual
-image_space == native
-duplicate_of is null
-mask_voxels > 0
-```
-
-## Pipeline Placement
-
-Use this document to decide and clean external data. Then use the active Kaggle
-workflow to:
-
-1. split external records by manifest `animal_id` into train and validation;
-2. select one source checkpoint using external validation only;
-3. fine-tune that checkpoint on the same five LYS folds and with the same
-   selected loss/settings as the direct baseline;
-4. calibrate a separate OOF threshold;
-5. compare direct versus external-initialized predictions on identical LYS
-   cases;
-6. reserve the locked LYS test until initialization, threshold, and ensemble
-   are frozen.
+The portable prepared manifest, orientation/flip manifests, QC report, external
+split manifest, seed, and selected external checkpoint are part of the final
+artifact trail.

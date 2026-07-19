@@ -10,15 +10,8 @@ import numpy as np
 import pytest
 import yaml
 
-from ratlesnetv2_finetune.commands import build_cloud_command_plan, format_command
 from ratlesnetv2_finetune.dataset import prepare_dataset
 from ratlesnetv2_finetune.roiset_to_nifti_mask import convert_roiset_to_nifti_mask
-from ratlesnetv2_finetune.scripts.finetune_an2023 import (
-    _an2023_normalize,
-    _center_crop_or_pad,
-    _find_cases,
-    _restore_crop_or_pad,
-)
 from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
     _build_loss_fn,
     _format_epoch_metrics,
@@ -49,9 +42,7 @@ from ratlesnetv2_finetune.scripts.review_lys_masks_itksnap import (
     validate_grid,
     wait_for_next_case,
 )
-from ratlesnetv2_finetune.scripts.run_training_grid import build_experiment_commands
 from ratlesnetv2_finetune.scripts.split_prepared_dataset import split_prepared_dataset
-from ratlesnetv2_finetune.scripts.summarize_training_grid import summarize_runs
 from ratlesnetv2_finetune.source_folders import add_source_folder_to_plan
 
 SPACING = (0.07, 0.07, 0.5)
@@ -197,42 +188,6 @@ def test_nibabel_get_data_compat_patch_restores_upstream_loader_call():
     assert np.allclose(loaded, 1)
 
 
-def test_an2023_crop_pad_roundtrip_restores_source_grid():
-    source = np.zeros((8, 10, 3), dtype=np.uint8)
-    source[3:5, 4:7, 1] = 1
-
-    cropped, plan = _center_crop_or_pad(source, (6, 12, 5), fill=0)
-    restored = _restore_crop_or_pad(cropped, plan, fill=0)
-
-    assert cropped.shape == (6, 12, 5)
-    assert restored.shape == source.shape
-    assert np.array_equal(restored, source)
-
-
-def test_an2023_normalization_matches_notebook_scaling():
-    scan = np.array([0.0, 5.0, 10.0], dtype=np.float32).reshape((3, 1, 1))
-
-    normalized = _an2023_normalize(scan)
-
-    assert normalized[0, 0, 0] == pytest.approx(-1.0)
-    assert normalized[1, 0, 0] == pytest.approx(0.0)
-    assert normalized[2, 0, 0] == pytest.approx(1.0)
-
-
-def test_an2023_find_cases_uses_prepared_ratlesnet_layout(tmp_path):
-    case_dir = tmp_path / "train" / "LYS" / "5d" / "BD_01_5d"
-    case_dir.mkdir(parents=True)
-    _write_nifti(case_dir / "scan.nii.gz", np.ones((8, 9, 3), dtype=np.float32))
-    _write_nifti(case_dir / "scan_lesionIAM.nii.gz", np.zeros((8, 9, 3), dtype=np.uint8))
-
-    cases = _find_cases(tmp_path / "train")
-
-    assert len(cases) == 1
-    assert cases[0].case_id == "BD_01_5d"
-    assert cases[0].scan == case_dir / "scan.nii.gz"
-    assert cases[0].label == case_dir / "scan_lesionIAM.nii.gz"
-
-
 def test_epoch_log_metrics_include_precision_recall_and_voxel_recovery():
     text = _format_epoch_metrics(
         [
@@ -292,161 +247,6 @@ def test_ratlesnet_loss_builder_keeps_default_and_supports_tversky():
     loss = loss_fn(pred, target)
 
     assert float(loss.detach().cpu()) < 0.5
-
-
-def test_training_grid_builds_ratlesnet_and_an2023_commands(tmp_path):
-    config = {
-        "output_root": str(tmp_path / "grid"),
-        "splits": {
-            "lys_train": "/kaggle/working/lys/train",
-            "lys_validation": "/kaggle/working/lys/validation",
-        },
-        "paths": {
-            "ratlesnet_repo": "/kaggle/working/RatLesNetv2",
-            "ratlesnet_pretrained": "/kaggle/working/RatLesNetv2/model",
-            "an2023_model": "/kaggle/working/stroke-lesion-segmentation/lesion_model.pt",
-        },
-        "defaults": {
-            "gpu": 0,
-            "save_every": 1,
-            "eval_every": 1,
-            "export_predictions": "validation",
-        },
-        "experiments": [
-            {
-                "name": "rat_direct",
-                "kind": "ratlesnetv2",
-                "input": "lys_train",
-                "validation": "lys_validation",
-                "ratlesnet_repo": "ratlesnet_repo",
-                "pretrained_model": "ratlesnet_pretrained",
-                "require_pretrained": True,
-                "epochs": 2,
-                "lr": 5e-5,
-                "loss": "focal-tversky",
-                "tversky_alpha": 0.3,
-                "tversky_beta": 0.7,
-                "focal_tversky_gamma": 0.75,
-            },
-            {
-                "name": "an_direct",
-                "kind": "an2023",
-                "input": "lys_train",
-                "validation": "lys_validation",
-                "model_path": "an2023_model",
-                "epochs": 2,
-                "lr": 1e-5,
-                "metrics_threshold": 0.8,
-            },
-        ],
-    }
-
-    commands = build_experiment_commands(config)
-
-    assert len(commands) == 2
-    rat_cmd = commands[0].command
-    an_cmd = commands[1].command
-    assert "ratlesnetv2_finetune.scripts.finetune_ratlesnetv2" in rat_cmd
-    assert "--require-pretrained" in rat_cmd
-    assert "--loss" in rat_cmd
-    assert "focal-tversky" in rat_cmd
-    assert "--focal-tversky-gamma" in rat_cmd
-    assert "/kaggle/working/lys/train" in rat_cmd
-    assert "ratlesnetv2_finetune.scripts.finetune_an2023" in an_cmd
-    assert "--metrics-threshold" in an_cmd
-    assert "/kaggle/working/stroke-lesion-segmentation/lesion_model.pt" in an_cmd
-
-
-def test_summarize_runs_writes_comparison_report(tmp_path):
-    run_dir = tmp_path / "grid" / "rat_direct" / "1"
-    run_dir.mkdir(parents=True)
-    (run_dir / "experiment_metadata.json").write_text(
-        json.dumps({"name": "rat_direct", "kind": "ratlesnetv2"})
-    )
-    (run_dir / "run_config.json").write_text(
-        json.dumps(
-            {
-                "loss": "tversky",
-                "tversky_alpha": 0.3,
-                "tversky_beta": 0.7,
-                "lr": 1e-5,
-                "epochs": 5,
-            }
-        )
-    )
-    (run_dir / "run_status.json").write_text(json.dumps({"status": "completed"}))
-    (run_dir / "best_checkpoints.json").write_text(
-        json.dumps(
-            {
-                "validation_dice": {
-                    "epoch": 2,
-                    "filename": "best_by_validation_dice.model",
-                }
-            }
-        )
-    )
-    (run_dir / "best_by_validation_dice.model").write_text("weights")
-    overlay = run_dir / "latest_validation_qc_overlay.png"
-    overlay.write_bytes(b"not-a-real-png")
-    (run_dir / "latest_validation_qc_overlay.json").write_text(
-        json.dumps({"latest_overlay": str(overlay)})
-    )
-    with (run_dir / "metrics_epoch.csv").open("w", newline="") as fh:
-        writer = csv.DictWriter(
-            fh,
-            fieldnames=[
-                "epoch",
-                "split",
-                "n_cases",
-                "lr",
-                "loss",
-                "dice_mean",
-                "precision_mean",
-                "recall_mean",
-                "target_voxels",
-                "pred_voxels",
-            ],
-        )
-        writer.writeheader()
-        writer.writerow(
-            {
-                "epoch": 1,
-                "split": "validation",
-                "n_cases": 2,
-                "lr": 0.00005,
-                "loss": 0.8,
-                "dice_mean": 0.4,
-                "precision_mean": 0.5,
-                "recall_mean": 0.6,
-                "target_voxels": 100,
-                "pred_voxels": 80,
-            }
-        )
-        writer.writerow(
-            {
-                "epoch": 2,
-                "split": "validation",
-                "n_cases": 2,
-                "lr": 0.00005,
-                "loss": 0.7,
-                "dice_mean": 0.55,
-                "precision_mean": 0.65,
-                "recall_mean": 0.7,
-                "target_voxels": 100,
-                "pred_voxels": 95,
-            }
-        )
-
-    summaries = summarize_runs(run_dirs=[run_dir], output_dir=tmp_path / "report")
-
-    assert summaries[0].best_validation_dice == pytest.approx(0.55)
-    comparison = (tmp_path / "report" / "comparison.csv").read_text()
-    assert "rat_direct" in comparison
-    assert "tversky" in comparison
-    assert "alpha=0.3, beta=0.7" in comparison
-    assert "0.55" in comparison
-    assert (tmp_path / "report" / "report.html").exists()
-    assert (tmp_path / "report" / "selected_recommendation.json").exists()
 
 
 def test_prepare_dataset_rejects_spacing_mismatch(tmp_path):
@@ -1182,75 +982,3 @@ def test_run_status_records_interrupt_metadata(tmp_path):
         "reason": "KeyboardInterrupt",
         "status": "interrupted",
     }
-
-
-def test_cloud_command_plan_includes_pretrained_model():
-    plan = build_cloud_command_plan(
-        ratlesnet_repo="/content/RatLesNetv2",
-        train_input="/content/dataset/train",
-        validation_input="/content/dataset/validation",
-        test_input="/content/dataset/test",
-        output_dir="/content/runs",
-        pretrained_model="/content/pretrained/RatLesNetv2.model",
-        require_pretrained=True,
-        epochs=3,
-        lr=5e-5,
-        gpu=0,
-        load_memory=0,
-        save_every=1,
-        eval_only=True,
-        eval_every=1,
-        metrics_threshold=0.4,
-        loss="weighted-ce-dice",
-        background_class_weight=1.0,
-        lesion_class_weight=5.0,
-        tversky_alpha=0.3,
-        tversky_beta=0.7,
-        focal_tversky_gamma=0.75,
-        early_stop_patience=4,
-        lr_scheduler="reduce-on-plateau",
-        lr_scheduler_metric="validation_dice",
-        lr_plateau_patience=2,
-        lr_plateau_factor=0.5,
-        lr_plateau_min_delta=0.01,
-        min_lr=1e-6,
-        export_predictions="validation",
-        export_prediction_limit=2,
-        export_prediction_epochs="1,final",
-        max_train_cases=1,
-        max_validation_cases=1,
-        max_test_cases=1,
-    )
-
-    command = format_command(plan.finetune_command)
-
-    assert "git" in plan.clone_command[0]
-    assert "--pretrained-model /content/pretrained/RatLesNetv2.model" in command
-    assert "--require-pretrained" in command
-    assert "--validation /content/dataset/validation" in command
-    assert "--test /content/dataset/test" in command
-    assert "--epochs 3" in command
-    assert "--lr 5e-05" in command
-    assert "--save-every 1" in command
-    assert "--eval-only" in command
-    assert "--eval-every 1" in command
-    assert "--metrics-threshold 0.4" in command
-    assert "--loss weighted-ce-dice" in command
-    assert "--background-class-weight 1.0" in command
-    assert "--lesion-class-weight 5.0" in command
-    assert "--tversky-alpha 0.3" in command
-    assert "--tversky-beta 0.7" in command
-    assert "--focal-tversky-gamma 0.75" in command
-    assert "--early-stop-patience 4" in command
-    assert "--lr-scheduler reduce-on-plateau" in command
-    assert "--lr-scheduler-metric validation_dice" in command
-    assert "--lr-plateau-patience 2" in command
-    assert "--lr-plateau-factor 0.5" in command
-    assert "--lr-plateau-min-delta 0.01" in command
-    assert "--min-lr 1e-06" in command
-    assert "--export-predictions validation" in command
-    assert "--export-prediction-limit 2" in command
-    assert "--export-prediction-epochs 1,final" in command
-    assert "--max-train-cases 1" in command
-    assert "--max-validation-cases 1" in command
-    assert "--max-test-cases 1" in command

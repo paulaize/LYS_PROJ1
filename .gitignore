@@ -56,6 +56,3 @@ venv/
 # Local RatLesNetV2 dataset plans may contain absolute source paths
 ratlesnetv2_finetune/configs/local_*.yml
 ratlesnetv2_finetune/configs/*_local.yml
-
-AGENTS.md
-CLAUDE.md

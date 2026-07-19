@@ -127,7 +127,7 @@ class Config:
         if node is None or node == "TODO":
             raise ValueError(
                 f"Config key '{dotted_key}' in {source} is still unset (TODO). "
-                "Fill it before running this stage — see AGENTS.md §12."
+                "Fill it before running this stage; do not guess the value."
             )
         return node
 

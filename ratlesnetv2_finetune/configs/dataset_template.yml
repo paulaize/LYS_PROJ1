@@ -3,7 +3,7 @@
 # Outputs are generated training folders under work/ and are safe to delete.
 # Source scan/mask paths may point to data/ or work/, but they are never edited.
 
-dataset_name: "LYS_T2w_manual_v0"
+dataset_name: "LYS_T2w_manual_TEMPLATE"
 output_root: "work/ratlesnetv2_finetune/datasets"
 
 preprocessing:
@@ -28,4 +28,3 @@ splits:
       lesion_mask: "work/BD_08_5D/lesion_corrected.nii.gz"
   validation: []
   test: []
-

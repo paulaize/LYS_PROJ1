@@ -1,7 +1,7 @@
 """Lesion volume from a binary mask + voxel spacing.
 
 CRITICAL: voxels are anisotropic. Volume = voxel_count * (sx*sy*sz). Never
-assume isotropic spacing. (AGENTS.md §7)
+assume isotropic spacing.
 """
 from __future__ import annotations
 

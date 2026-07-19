@@ -1,54 +1,70 @@
-# RatLesNetV2 fine-tuning side track
+# RatLesNetV2 training utilities
 
-This folder contains the lesion-segmentation dataset preparation, QC, training,
-OOF calibration, and final ensemble utilities. It does not change the active
-v1 scientific rule: lesion volumes used for the study remain based on
-human-reviewed masks until the frozen model has been independently validated.
+This package contains the active T2w lesion dataset preparation, QC, grouped
+splitting, RatLesNetV2 fine-tuning, OOF threshold calibration, and locked-test
+ensemble tools.
 
-## Active LYS v1 workflow
+The executable experiment is
+[docs/ratlesnetv2_lys_v1_kaggle_workflow.md](../docs/ratlesnetv2_lys_v1_kaggle_workflow.md).
+Do not substitute ad hoc commands for its recorded folds, seeds, checkpoint
+rules, or test gate.
 
-The exact Kaggle cells and decision gates are in
-[`docs/ratlesnetv2_lys_v1_kaggle_workflow.md`](../docs/ratlesnetv2_lys_v1_kaggle_workflow.md).
+## Active experiment commands
 
-The active experiment is:
+| Module | Purpose |
+|---|---|
+| `normalize_prepared_dataset` | recover Kaggle-altered NIfTI names into a validated canonical tree |
+| `audit_prepared_dataset` | validate geometry, labels, artifacts, and review overlays |
+| `create_grouped_cv` | create subject-disjoint LYS test/fold assignments |
+| `split_prepared_dataset` | create grouped external train/validation data |
+| `finetune_ratlesnetv2` | train/evaluate RatLesNetV2 and export probabilities |
+| `calibrate_probability_threshold` | select a threshold from validation-only OOF maps |
+| `evaluate_probability_ensemble` | evaluate the frozen five-model locked-test ensemble once |
 
-```text
-corrected LYS_v1 + automatic QC
-  -> conservative same-animal grouping
-  -> locked 20% test + five development folds
-  -> direct Tversky on folds 0-4
-  -> direct CE+Dice on folds 0-4
-  -> separate OOF threshold calibration and paired loss comparison
-  -> one external-only train/validation adaptation checkpoint
-  -> same selected LYS loss on folds 0-4 from that checkpoint
-  -> external OOF threshold calibration
-  -> paired direct-versus-external comparison
-  -> freeze five models, threshold, mean-probability ensemble, no postprocessing
-  -> evaluate the locked test once
+Run help locally through the existing environment:
+
+```bash
+make ratlesnetv2-normalize RUN_ARGS="--help"
+make ratlesnetv2-audit RUN_ARGS="--help"
+make ratlesnetv2-grouped-cv RUN_ARGS="--help"
+make ratlesnetv2-split-prepared RUN_ARGS="--help"
+make ratlesnetv2-calibrate-threshold RUN_ARGS="--help"
+make ratlesnetv2-evaluate-ensemble RUN_ARGS="--help"
 ```
 
-Do not select Tversky versus CE+Dice from fold 0. Do not use LYS validation to
-select the external source checkpoint. Do not inspect the locked test before
-all model and threshold decisions are frozen.
+## Dataset rebuild utilities
 
-“Direct” means the upstream RatLesNetV2 rat checkpoint is fine-tuned on LYS
-without the external dataset. “External-pretrained” uses the same starting
-checkpoint, adds external-only adaptation, then uses the identical LYS target
-configuration. External data are retained as a controlled comparator, not
-assumed to be beneficial.
+These are not called during every Kaggle run, but they are required to recreate
+the reviewed inputs and their provenance:
 
-nnU-Net remains a useful later benchmark but is not part of this active
-RatLesNetV2 experiment.
+- `prepare_lys_roiset_dataset.py` and `roiset_to_nifti_mask.py`: stage LYS
+  Bruker scans and convert Fiji lesion RoiSets.
+- `review_lys_masks_itksnap.py`: queue editable mask copies without modifying
+  source data.
+- `dataset.py`, `source_folders.py`, `add_source_folder.py`, and
+  `prepare_dataset.py`: build the RatLesNetV2 case-folder contract.
+- `download_external_datasets.py`, `orient_external_dataset_lsp.py`, and
+  `flip_external_si_axis.py`: recreate the external mouse source.
+- `package_prepared_dataset.py`: create portable versioned Kaggle archives.
 
-## Current prepared archive
+Portable configuration examples are under `configs/`. Files named
+`local_*.yml` are ignored because they may contain workstation paths.
 
-The corrected archive is:
+## Data contract
+
+Each prepared case contains:
 
 ```text
-outputs/ratlesnetv2_finetune/LYS_T2w_manual_v1.tar.gz
+scan.nii.gz               # 4-D X x Y x slices x 1
+scan_lesionIAM.nii.gz     # 3-D binary label used by upstream loader
+scan_lesion.nii.gz        # identical compatibility alias
 ```
 
-It contains 258 cases and excludes:
+The root `manifest.csv` carries case identity, split, study, timepoint, paths,
+shape, spacing, and lesion-volume provenance. Generated datasets, run folders,
+weights, and predictions stay outside Git.
+
+The current 258-case `LYS_T2w_manual_v1` archive excludes exactly:
 
 ```text
 Thrombin_09_PhIND__JD_TH09_C1S1bis_2
@@ -57,53 +73,9 @@ Thrombin_09_C1S4
 Thrombin_09_C2S2
 ```
 
-The conservative subject inference groups only clear filename-supported D1/D7
-pairs and treats every other case as a singleton. Its output
-`inferred_subject_groups.csv` and the final `split_assignments.csv` are required
-provenance artifacts.
+Changing that list requires a new dataset/split version.
 
-## Main utilities
+## Development rule
 
-- `audit_prepared_dataset.py`: scan/mask shape, affine, spacing, lesion geometry,
-  connected components, flags, and overlay gallery.
-- `create_grouped_cv.py`: locked subject groups and five development folds.
-- `split_prepared_dataset.py`: external-only train/validation split grouped by
-  manifest `animal_id`.
-- `finetune_ratlesnetv2.py`: controlled losses, validation-Dice checkpointing,
-  early stopping, LR reduction, and NIfTI probability export.
-- `calibrate_probability_threshold.py`: pooled OOF threshold sweep with case,
-  surface, volume, failure, and subgroup metrics; rejects test predictions.
-- `evaluate_probability_ensemble.py`: averages five frozen test probability
-  maps using an OOF-derived threshold and writes the one-time locked-test report.
-- `package_prepared_dataset.py`: versioned portable `.tar.gz` packaging with
-  explicit case exclusions.
-
-The existing An-2023 and historical training-grid utilities are optional
-comparators. They are not required for the active workflow. nnU-Net is deferred
-and has no active conversion/training script in this branch.
-
-## Local commands
-
-Use the existing `lys-bbb` environment:
-
-```bash
-make test
-
-make ratlesnetv2-audit RUN_ARGS="--help"
-make ratlesnetv2-grouped-cv RUN_ARGS="--help"
-make ratlesnetv2-split-prepared RUN_ARGS="--help"
-make ratlesnetv2-calibrate-threshold RUN_ARGS="--help"
-make ratlesnetv2-evaluate-ensemble RUN_ARGS="--help"
-```
-
-Dataset inputs are read-only. Local intermediates belong under `work/`, final
-archives and reports under `outputs/`, and neither model weights nor prepared
-datasets belong in git.
-
-## Historical results
-
-Results from the old 39-case `LYS_v0` validation split are preliminary only.
-They motivated testing RatLesNetV2, Tversky, CE+Dice, and external adaptation,
-but they must not be used to select the final `LYS_v1` model because labels and
-subject grouping changed. Historical notebooks, predictions, and checkpoints
-should be preserved as `LYS_v0`, not mixed with the v1 output folders.
+Run `make lint` and `make test` after code changes. Tests use synthetic NIfTI
+fixtures and must not download datasets or model weights.
