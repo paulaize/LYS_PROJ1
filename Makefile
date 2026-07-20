@@ -10,7 +10,8 @@ RATLESNET_CONFIG ?= ratlesnetv2_finetune/configs/dataset_template.yml
 .PHONY: ratlesnetv2-prepare-lys-roisets ratlesnetv2-review-lys-masks
 .PHONY: ratlesnetv2-prepare ratlesnetv2-package ratlesnetv2-normalize
 .PHONY: ratlesnetv2-split-prepared ratlesnetv2-audit ratlesnetv2-grouped-cv
-.PHONY: ratlesnetv2-calibrate-threshold ratlesnetv2-evaluate-ensemble run clean
+.PHONY: ratlesnetv2-calibrate-threshold ratlesnetv2-evaluate-ensemble
+.PHONY: ratlesnetv2-infer run clean
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
@@ -77,6 +78,9 @@ ratlesnetv2-calibrate-threshold:
 
 ratlesnetv2-evaluate-ensemble:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.evaluate_probability_ensemble $(RUN_ARGS)
+
+ratlesnetv2-infer:
+	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.infer_ratlesnetv2_ensemble $(RUN_ARGS)
 
 # Run one animal:
 #   make run CONFIG=config/animals/BD_08_5D.yml RUN_ARGS=--no-mask-editor [IHC=work/BD_08_5D/ihc_A.csv]

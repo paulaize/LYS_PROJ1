@@ -20,6 +20,7 @@ rules, or test gate.
 | `finetune_ratlesnetv2` | train/evaluate RatLesNetV2 and export probabilities |
 | `calibrate_probability_threshold` | select a threshold from validation-only OOF maps |
 | `evaluate_probability_ensemble` | evaluate the frozen five-model locked-test ensemble once |
+| `infer_ratlesnetv2_ensemble` | run the frozen mean-probability ensemble on unlabeled scans |
 
 ## Versioned architecture comparator
 
@@ -47,6 +48,7 @@ make ratlesnetv2-grouped-cv RUN_ARGS="--help"
 make ratlesnetv2-split-prepared RUN_ARGS="--help"
 make ratlesnetv2-calibrate-threshold RUN_ARGS="--help"
 make ratlesnetv2-evaluate-ensemble RUN_ARGS="--help"
+make ratlesnetv2-infer RUN_ARGS="--help"
 ```
 
 ## Dataset rebuild utilities

@@ -25,6 +25,10 @@ from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
     _lesion_probability_map,
     _prediction_to_binary,
 )
+from ratlesnetv2_finetune.scripts.infer_ratlesnetv2_ensemble import (
+    _sha256,
+    infer_ratlesnetv2_ensemble,
+)
 from ratlesnetv2_finetune.scripts.normalize_prepared_dataset import (
     normalize_prepared_dataset,
 )
@@ -462,6 +466,109 @@ def test_locked_test_ensemble_requires_oof_threshold_and_averages_five_models(tm
             output_root=output,
             expected_models=5,
         )
+
+
+def test_unlabeled_frozen_ensemble_inference_preserves_native_geometry(tmp_path):
+    import torch
+
+    class FakeDataWrapper:
+        def __init__(self, path, stage, device, loadMemory):  # noqa: N803, ARG002
+            assert stage == "test"
+            self.device = device
+            self.list = [f"{scan.parent}/" for scan in sorted(Path(path).rglob("scan.nii.gz"))]
+
+        def __len__(self):
+            return len(self.list)
+
+        def __getitem__(self, index):
+            source = Path(self.list[index])
+            array = np.asanyarray(nib.load(str(source / "scan.nii.gz")).dataobj)
+            array = (array - array.mean()) / array.std()
+            array = np.moveaxis(array, -1, 0)
+            array = np.moveaxis(array, -1, 1)
+            tensor = torch.as_tensor(array[None, ...], dtype=torch.float32, device=self.device)
+            return tensor, None, self.list[index]
+
+    class FakeRatLesNetV2(torch.nn.Module):
+        def __init__(self, modalities, filters):
+            super().__init__()
+            assert modalities == 1 and filters == 32
+            self.lesion_logit = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, value):
+            lesion = torch.sigmoid(self.lesion_logit + torch.zeros_like(value[:, :1]))
+            return (torch.cat([1.0 - lesion, lesion], dim=1),)
+
+    upstream = tmp_path / "RatLesNetv2"
+    upstream.mkdir()
+    input_root = tmp_path / "input"
+    case_root = input_root / "study" / "mixed" / "new_case"
+    case_root.mkdir(parents=True)
+    scan = np.arange(8 * 6 * 4, dtype=np.float32).reshape(8, 6, 4, 1)
+    scan_path = case_root / "scan.nii.gz"
+    _write_nifti(scan_path, scan)
+
+    probabilities = [0.2, 0.3, 0.4, 0.7, 0.9]
+    models = []
+    for fold, probability in enumerate(probabilities):
+        model = FakeRatLesNetV2(modalities=1, filters=32)
+        model.lesion_logit.data.fill_(float(np.log(probability / (1.0 - probability))))
+        path = tmp_path / f"fold_{fold}.model"
+        torch.save(model.state_dict(), path)
+        models.append(path)
+
+    threshold_json = tmp_path / "selected_threshold.json"
+    threshold_json.write_text(
+        json.dumps(
+            {
+                "selected_threshold": 0.4,
+                "selection_data": "out_of_fold_validation_only",
+                "locked_test_used": False,
+            }
+        )
+    )
+    frozen_spec = tmp_path / "frozen_spec.json"
+    frozen_spec.write_text(
+        json.dumps(
+            {
+                "architecture": "RatLesNetV2",
+                "ensemble": "unweighted mean lesion probability",
+                "postprocessing": "none",
+                "threshold": 0.4,
+                "project_git_commit": "project-commit",
+                "ratlesnetv2_git_commit": "upstream-commit",
+                "fold_models": [
+                    {"fold": fold, "sha256": _sha256(path)}
+                    for fold, path in enumerate(models)
+                ],
+            }
+        )
+    )
+
+    output = tmp_path / "inference"
+    summary = infer_ratlesnetv2_ensemble(
+        ratlesnet_repo=upstream,
+        input_root=input_root,
+        model_paths=models,
+        threshold_json=threshold_json,
+        frozen_spec=frozen_spec,
+        output_root=output,
+        device_name="cpu",
+        dependencies=(torch, FakeDataWrapper, FakeRatLesNetV2),
+    )
+
+    probability_image = nib.load(
+        str(output / "cases/new_case/ensemble_probability.nii.gz")
+    )
+    mask_image = nib.load(str(output / "cases/new_case/ensemble_mask.nii.gz"))
+    assert probability_image.shape == scan.shape[:3]
+    assert np.allclose(probability_image.affine, nib.load(str(scan_path)).affine)
+    assert np.allclose(np.asanyarray(probability_image.dataobj), np.mean(probabilities))
+    assert np.asanyarray(mask_image.dataobj).all()
+    assert summary["n_cases"] == 1
+    assert summary["device"] == "cpu"
+    assert summary["postprocessing"] == "none"
+    assert _read_csv(output / "inference_manifest.csv")[0]["case_id"] == "new_case"
 
 
 def test_versioned_package_excludes_cases_and_uses_portable_paths(tmp_path):

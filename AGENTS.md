@@ -85,6 +85,7 @@ Core experiment:
   metrics, and probability exports
 - `calibrate_probability_threshold.py`: validation-only OOF threshold selection
 - `evaluate_probability_ensemble.py`: one-time five-model locked-test ensemble
+- `infer_ratlesnetv2_ensemble.py`: frozen five-model inference on unlabeled scans
 - `normalize_prepared_dataset.py`: Kaggle input repair and validation
 
 Dataset rebuild/provenance utilities are also active and must be kept:

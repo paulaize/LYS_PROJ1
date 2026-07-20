@@ -70,6 +70,8 @@ make ratlesnetv2-evaluate-ensemble RUN_ARGS="--help"
 The Kaggle guide calls the trainer and evaluation utilities directly with
 fully recorded options. Local preparation/rebuild commands are summarized in
 [ratlesnetv2_finetune/README.md](ratlesnetv2_finetune/README.md).
+Frozen five-model inference on unlabeled scans is documented in
+[docs/ratlesnetv2_mac_inference.md](docs/ratlesnetv2_mac_inference.md).
 
 ## Active package
 
