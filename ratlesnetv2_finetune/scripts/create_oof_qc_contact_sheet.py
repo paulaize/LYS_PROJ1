@@ -36,6 +36,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold-json")
     parser.add_argument("--case-metrics")
     parser.add_argument(
+        "--reference-selection",
+        help="Optional prior QC CSV fixing case order, axis, and slice for paired comparison",
+    )
+    parser.add_argument("--candidate-label", default="candidate")
+    parser.add_argument(
         "--artifact-bundle",
         help="Prior LYS_v1_RatLesNetV2_final_artifacts.tar.gz to extract direct CE+Dice OOF files",
     )
@@ -76,6 +81,10 @@ def main() -> int:
         case_metrics_csv=case_metrics,
         output_png=Path(args.output),
         case_count=args.cases,
+        candidate_label=args.candidate_label,
+        reference_selection_csv=(
+            Path(args.reference_selection) if args.reference_selection else None
+        ),
         overwrite=args.overwrite,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
@@ -145,6 +154,8 @@ def create_oof_qc_contact_sheet(
     case_metrics_csv: Path,
     output_png: Path,
     case_count: int = 8,
+    candidate_label: str = "candidate",
+    reference_selection_csv: Path | None = None,
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Write a stratified OOF contact sheet and its selected-case CSV."""
@@ -173,14 +184,29 @@ def create_oof_qc_contact_sheet(
     records_by_case = {record["case_id"]: record for record in records}
     if set(metrics.case_id) != set(records_by_case):
         raise ValueError("OOF prediction and selected-threshold case sets differ")
-    selected = _select_cases(metrics, case_count=case_count)
+    selected = (
+        _select_reference_cases(metrics, reference_selection_csv)
+        if reference_selection_csv is not None
+        else _select_cases(metrics, case_count=case_count)
+    )
     loaded = [
-        _load_case(records_by_case[row.case_id], threshold=threshold, expected_dice=row.dice)
+        _load_case(
+            records_by_case[row.case_id],
+            threshold=threshold,
+            expected_dice=row.dice,
+            representative_axis=getattr(row, "reference_axis", None),
+            representative_slice=getattr(row, "reference_slice", None),
+        )
         for row in selected.itertuples(index=False)
     ]
 
     output_png.parent.mkdir(parents=True, exist_ok=True)
-    _render_contact_sheet(output_png, loaded, threshold=threshold)
+    _render_contact_sheet(
+        output_png,
+        loaded,
+        threshold=threshold,
+        candidate_label=candidate_label,
+    )
     selected_rows = []
     for selection, case in zip(selected.to_dict("records"), loaded, strict=True):
         selected_rows.append(
@@ -207,7 +233,12 @@ def create_oof_qc_contact_sheet(
         "n_oof_cases": len(records),
         "n_displayed_cases": len(loaded),
         "selected_threshold": threshold,
-        "selection": "four lowest-Dice cases plus evenly spaced cases from Q1 to maximum Dice",
+        "candidate_label": candidate_label,
+        "selection": (
+            "case order, axis, and slice fixed by reference-selection CSV"
+            if reference_selection_csv is not None
+            else "four lowest-Dice cases plus evenly spaced cases from Q1 to maximum Dice"
+        ),
         "locked_test_used": False,
     }
 
@@ -258,11 +289,48 @@ def _select_cases(metrics: pd.DataFrame, *, case_count: int) -> pd.DataFrame:
     return selected
 
 
+def _select_reference_cases(metrics: pd.DataFrame, path: Path) -> pd.DataFrame:
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    reference = pd.read_csv(path)
+    required = {
+        "case_id",
+        "qc_selection",
+        "representative_axis",
+        "representative_slice",
+    }
+    if not required <= set(reference.columns):
+        raise ValueError(
+            f"Reference selection lacks {sorted(required - set(reference.columns))}"
+        )
+    if reference.empty or not reference.case_id.is_unique:
+        raise ValueError("Reference selection must contain unique cases")
+    metrics_by_case = metrics.set_index("case_id")
+    if not metrics_by_case.index.is_unique:
+        raise ValueError("Candidate metrics must contain unique cases")
+    missing = [case_id for case_id in reference.case_id if case_id not in metrics_by_case.index]
+    if missing:
+        raise ValueError(f"Reference selection cases absent from candidate metrics: {missing}")
+    selected = metrics_by_case.loc[reference.case_id].reset_index()
+    selected["qc_selection"] = reference.qc_selection.to_numpy()
+    selected["reference_axis"] = pd.to_numeric(
+        reference.representative_axis,
+        errors="raise",
+    ).astype(int)
+    selected["reference_slice"] = pd.to_numeric(
+        reference.representative_slice,
+        errors="raise",
+    ).astype(int)
+    return selected
+
+
 def _load_case(
     record: dict[str, Any],
     *,
     threshold: float,
     expected_dice: float,
+    representative_axis: int | None = None,
+    representative_slice: int | None = None,
 ) -> dict[str, Any]:
     manifest = Path(record["manifest"])
     paths = {
@@ -286,8 +354,22 @@ def _load_case(
         raise RuntimeError(
             f"{record['case_id']}: rendered Dice {dice} differs from report {expected_dice}"
         )
-    axis = _slice_axis(target)
-    slice_index = _representative_slice(target, prediction, axis=axis)
+    axis = (
+        _slice_axis(target)
+        if representative_axis is None
+        else int(representative_axis)
+    )
+    if axis not in {0, 1, 2}:
+        raise ValueError(f"{record['case_id']}: invalid representative axis {axis}")
+    slice_index = (
+        _representative_slice(target, prediction, axis=axis)
+        if representative_slice is None
+        else int(representative_slice)
+    )
+    if not 0 <= slice_index < target.shape[axis]:
+        raise ValueError(
+            f"{record['case_id']}: slice {slice_index} is outside axis {axis}"
+        )
     return {
         "case_id": record["case_id"],
         "scan": scan,
@@ -317,14 +399,25 @@ def _resolve_artifact_path(record: dict[str, Any], role: str, manifest: Path) ->
     return existing[0]
 
 
-def _render_contact_sheet(path: Path, cases: list[dict[str, Any]], *, threshold: float) -> None:
+def _render_contact_sheet(
+    path: Path,
+    cases: list[dict[str, Any]],
+    *,
+    threshold: float,
+    candidate_label: str,
+) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     figure, axes = plt.subplots(len(cases), 4, figsize=(13, 3.1 * len(cases)), squeeze=False)
-    headers = ("T2 scan", "Manual mask (green)", "CE+Dice prediction (red)", "Errors")
+    headers = (
+        "T2 scan",
+        "Manual mask (green)",
+        f"{candidate_label} prediction (red)",
+        "Errors",
+    )
     for column, header in enumerate(headers):
         axes[0, column].set_title(header, fontsize=11, fontweight="bold")
     for row_index, case in enumerate(cases):
@@ -353,7 +446,7 @@ def _render_contact_sheet(path: Path, cases: list[dict[str, Any]], *, threshold:
             va="center",
         )
     figure.suptitle(
-        f"direct_ce_dice OOF development QC at selected threshold {threshold:.2f}\n"
+        f"{candidate_label} OOF development QC at selected threshold {threshold:.2f}\n"
         "Error colors: TP=yellow, FP=red, FN=cyan",
         fontsize=13,
     )

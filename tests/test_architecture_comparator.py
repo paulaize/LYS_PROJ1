@@ -425,6 +425,26 @@ def test_create_oof_qc_contact_sheet_uses_selected_threshold(tmp_path):
         "distribution_reference",
     }
 
+    paired_result = create_oof_qc_contact_sheet(
+        prediction_manifests=[manifest],
+        threshold_json=threshold,
+        case_metrics_csv=metrics,
+        output_png=tmp_path / "paired_qc.png",
+        case_count=2,
+        candidate_label="paired candidate",
+        reference_selection_csv=tmp_path / "qc.csv",
+    )
+    paired = _read_csv(tmp_path / "paired_qc.csv")
+    assert paired_result["candidate_label"] == "paired candidate"
+    assert paired_result["n_displayed_cases"] == 6
+    assert [row["case_id"] for row in paired] == [row["case_id"] for row in selected]
+    assert [row["representative_axis"] for row in paired] == [
+        row["representative_axis"] for row in selected
+    ]
+    assert [row["representative_slice"] for row in paired] == [
+        row["representative_slice"] for row in selected
+    ]
+
 
 def test_extract_direct_ce_oof_artifact_extracts_only_qc_inputs(tmp_path):
     source = tmp_path / "source"

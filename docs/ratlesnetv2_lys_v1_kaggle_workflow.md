@@ -928,13 +928,14 @@ This locked-test result is the final unbiased estimate for the frozen model. Do
 not change the model because one test cohort or case performed poorly. Any
 future change starts a new version and needs a new untouched test design.
 
-## Cell 20 — end-of-run visual QC of direct CE+Dice OOF masks
+## Cell 20 — end-of-run paired visual QC of all three OOF candidates
 
 Run this only after the one-time locked-test evaluation above. It compares the
-direct CE+Dice development OOF masks with their manual masks at the selected
-OOF threshold. It does not read the locked test. The sheet shows the four
-lowest-Dice cases plus four cases spread from the first quartile through the
-best result, so it does not show only failures or only attractive examples.
+three candidates' development OOF masks with their manual masks at each
+candidate's selected OOF threshold. It does not read the locked test. Direct
+CE+Dice selects four lowest-Dice cases plus four cases spread from the first
+quartile through the best result. Tversky and external-pretrained CE+Dice then
+use those exact case IDs, anatomical axes, and slices for a paired comparison.
 
 This is a final audit visualization, not a new selection step. Do not use it to
 change the completed model, threshold, split, postprocessing, or case
@@ -942,37 +943,48 @@ inclusion. Any problem discovered here belongs to a future version with a new
 untouched test design.
 
 ```python
+QC_CANDIDATES = {
+    "direct_ce_dice": "Direct CE+Dice",
+    "direct_tversky": "Direct Tversky",
+    "external_pretrained_ce_dice": "External-pretrained CE+Dice",
+}
+OOF_QC_PNGS = {}
 DIRECT_CE_QC_PNG = WORK / "direct_ce_dice_oof_qc.png"
-subprocess.run(
-    [
+DIRECT_CE_SELECTION = DIRECT_CE_QC_PNG.with_suffix(".csv")
+
+for candidate_name, candidate_label in QC_CANDIDATES.items():
+    output_png = WORK / f"{candidate_name}_oof_qc.png"
+    command = [
         sys.executable, "-m",
         "ratlesnetv2_finetune.scripts.create_oof_qc_contact_sheet",
-        "--prediction-root", str(RUNS_ROOT / "direct_ce_dice"),
+        "--prediction-root", str(RUNS_ROOT / candidate_name),
         "--threshold-json",
-        str(THRESHOLD_ROOT / "direct_ce_dice/selected_threshold.json"),
+        str(THRESHOLD_ROOT / candidate_name / "selected_threshold.json"),
         "--case-metrics",
         str(
             THRESHOLD_ROOT
-            / "direct_ce_dice/selected_threshold_case_metrics.csv"
+            / candidate_name
+            / "selected_threshold_case_metrics.csv"
         ),
-        "--output", str(DIRECT_CE_QC_PNG),
+        "--candidate-label", candidate_label,
+        "--output", str(output_png),
         "--cases", "8",
         "--overwrite",
-    ],
-    cwd=PROJECT,
-    check=True,
-)
-
-assert DIRECT_CE_QC_PNG.is_file()
-display(Image(filename=str(DIRECT_CE_QC_PNG)))
-display(pd.read_csv(DIRECT_CE_QC_PNG.with_suffix(".csv")))
-print("Saved Kaggle output PNG:", DIRECT_CE_QC_PNG)
+    ]
+    if candidate_name != "direct_ce_dice":
+        command += ["--reference-selection", str(DIRECT_CE_SELECTION)]
+    subprocess.run(command, cwd=PROJECT, check=True)
+    assert output_png.is_file()
+    OOF_QC_PNGS[candidate_name] = output_png
+    display(Image(filename=str(output_png)))
+    display(pd.read_csv(output_png.with_suffix(".csv")))
+    print("Saved Kaggle output PNG:", output_png)
 ```
 
 Panel colors are:
 
 - manual mask: green;
-- CE+Dice prediction: red;
+- candidate prediction: red;
 - error panel: true positive yellow, false positive red, false negative cyan.
 
 ## Cell 21 — package the final reproducibility artifacts
@@ -1019,14 +1031,17 @@ bundle_items = [
     (RUNS_ROOT, "runs"),
     (THRESHOLD_ROOT, "thresholds"),
     (WORK / "lys_v1_comparisons", "comparisons"),
-    (DIRECT_CE_QC_PNG, "comparisons/direct_ce_dice_oof_qc.png"),
-    (
-        DIRECT_CE_QC_PNG.with_suffix(".csv"),
-        "comparisons/direct_ce_dice_oof_qc.csv",
-    ),
     (FROZEN_SPEC, "frozen/lys_v1_final_frozen_spec.json"),
     (TEST_EXPORT_ROOT, "locked_test/fold_predictions"),
     (FINAL_TEST_OUTPUT, "locked_test/final_ensemble"),
+]
+bundle_items += [
+    (path, f"comparisons/{candidate_name}_oof_qc.png")
+    for candidate_name, path in OOF_QC_PNGS.items()
+]
+bundle_items += [
+    (path.with_suffix(".csv"), f"comparisons/{candidate_name}_oof_qc.csv")
+    for candidate_name, path in OOF_QC_PNGS.items()
 ]
 bundle_items += [
     (path, f"split_provenance/LYS/{path.name}")
