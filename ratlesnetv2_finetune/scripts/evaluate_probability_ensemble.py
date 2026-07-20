@@ -21,6 +21,7 @@ import numpy as np
 from ratlesnetv2_finetune.scripts.calibrate_probability_threshold import (
     LoadedPrediction,
     _aggregate_threshold,
+    _canonical_prediction_case_id,
     _case_metrics,
     _load_case,
     _subgroup_metrics,
@@ -97,7 +98,6 @@ def evaluate_probability_ensemble(
         raise ValueError("Each fold prediction manifest must be different")
     if surface_tolerance_mm <= 0:
         raise ValueError("surface_tolerance_mm must be > 0")
-    _prepare_output(output_root, overwrite=overwrite)
 
     threshold_record = _read_threshold_record(threshold_json)
     threshold = float(threshold_record["selected_threshold"])
@@ -113,6 +113,15 @@ def evaluate_probability_ensemble(
             )
 
     metadata = _read_test_metadata(metadata_path) if metadata_path else {}
+    if metadata_path is not None and set(metadata) != expected_cases:
+        missing = sorted(expected_cases - set(metadata))
+        extra = sorted(set(metadata) - expected_cases)
+        raise ValueError(
+            "Locked-test metadata does not match prediction case IDs: "
+            f"missing={missing[:5]}, extra={extra[:5]}"
+        )
+    _prepare_output(output_root, overwrite=overwrite)
+
     case_rows: list[dict[str, Any]] = []
     ensemble_rows: list[dict[str, Any]] = []
     for case_id in sorted(expected_cases):
@@ -226,10 +235,12 @@ def _read_test_records(path: Path) -> dict[str, dict[str, str]]:
     for row in rows:
         if row.get("split") != "test":
             raise ValueError(f"Locked-test ensemble accepts split='test' only: {path}")
-        case_id = _required(row, "case_id")
+        case_id = _canonical_prediction_case_id(row)
         if case_id in result:
             raise ValueError(f"Duplicate case_id={case_id!r} in {path}")
-        result[case_id] = row
+        record = dict(row)
+        record["case_id"] = case_id
+        result[case_id] = record
     return result
 
 

@@ -19,6 +19,7 @@ build/
 # Jupyter / notebook scratch
 .ipynb_checkpoints/
 *.ipynb
+!notebooks/lys_v2_architecture_comparator_kaggle.ipynb
 
 # Environments
 .env

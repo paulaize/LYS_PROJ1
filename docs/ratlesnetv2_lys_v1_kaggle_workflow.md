@@ -466,6 +466,10 @@ for candidate_name, loss_config in LOSS_CONFIGS.items():
 
 ```python
 def require_five_oof_manifests(candidate_name: str) -> list[Path]:
+    from ratlesnetv2_finetune.scripts.calibrate_probability_threshold import (
+        _canonical_prediction_case_id,
+    )
+
     manifests = []
     for fold in range(5):
         run = successful_run(RUNS_ROOT / candidate_name / f"fold_{fold}")
@@ -480,6 +484,10 @@ def require_five_oof_manifests(candidate_name: str) -> list[Path]:
     expected = set(
         assignments.loc[assignments.outer_split == "development", "case_id"]
     )
+    rows["case_id"] = [
+        _canonical_prediction_case_id(row)
+        for row in rows.to_dict(orient="records")
+    ]
     assert len(rows) == len(expected)
     assert rows.case_id.is_unique
     assert set(rows.case_id) == expected
@@ -920,7 +928,54 @@ This locked-test result is the final unbiased estimate for the frozen model. Do
 not change the model because one test cohort or case performed poorly. Any
 future change starts a new version and needs a new untouched test design.
 
-## Cell 20 — package the final reproducibility artifacts
+## Cell 20 — end-of-run visual QC of direct CE+Dice OOF masks
+
+Run this only after the one-time locked-test evaluation above. It compares the
+direct CE+Dice development OOF masks with their manual masks at the selected
+OOF threshold. It does not read the locked test. The sheet shows the four
+lowest-Dice cases plus four cases spread from the first quartile through the
+best result, so it does not show only failures or only attractive examples.
+
+This is a final audit visualization, not a new selection step. Do not use it to
+change the completed model, threshold, split, postprocessing, or case
+inclusion. Any problem discovered here belongs to a future version with a new
+untouched test design.
+
+```python
+DIRECT_CE_QC_PNG = WORK / "direct_ce_dice_oof_qc.png"
+subprocess.run(
+    [
+        sys.executable, "-m",
+        "ratlesnetv2_finetune.scripts.create_oof_qc_contact_sheet",
+        "--prediction-root", str(RUNS_ROOT / "direct_ce_dice"),
+        "--threshold-json",
+        str(THRESHOLD_ROOT / "direct_ce_dice/selected_threshold.json"),
+        "--case-metrics",
+        str(
+            THRESHOLD_ROOT
+            / "direct_ce_dice/selected_threshold_case_metrics.csv"
+        ),
+        "--output", str(DIRECT_CE_QC_PNG),
+        "--cases", "8",
+        "--overwrite",
+    ],
+    cwd=PROJECT,
+    check=True,
+)
+
+assert DIRECT_CE_QC_PNG.is_file()
+display(Image(filename=str(DIRECT_CE_QC_PNG)))
+display(pd.read_csv(DIRECT_CE_QC_PNG.with_suffix(".csv")))
+print("Saved Kaggle output PNG:", DIRECT_CE_QC_PNG)
+```
+
+Panel colors are:
+
+- manual mask: green;
+- CE+Dice prediction: red;
+- error panel: true positive yellow, false positive red, false negative cyan.
+
+## Cell 21 — package the final reproducibility artifacts
 
 This deliberately excludes the normalized image copies and the symlinked fold
 trees because the source datasets already exist as private Kaggle inputs. It
@@ -964,6 +1019,11 @@ bundle_items = [
     (RUNS_ROOT, "runs"),
     (THRESHOLD_ROOT, "thresholds"),
     (WORK / "lys_v1_comparisons", "comparisons"),
+    (DIRECT_CE_QC_PNG, "comparisons/direct_ce_dice_oof_qc.png"),
+    (
+        DIRECT_CE_QC_PNG.with_suffix(".csv"),
+        "comparisons/direct_ce_dice_oof_qc.csv",
+    ),
     (FROZEN_SPEC, "frozen/lys_v1_final_frozen_spec.json"),
     (TEST_EXPORT_ROOT, "locked_test/fold_predictions"),
     (FINAL_TEST_OUTPUT, "locked_test/final_ensemble"),

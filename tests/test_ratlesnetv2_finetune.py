@@ -14,6 +14,7 @@ from ratlesnetv2_finetune.dataset import prepare_dataset
 from ratlesnetv2_finetune.roiset_to_nifti_mask import convert_roiset_to_nifti_mask
 from ratlesnetv2_finetune.scripts.finetune_ratlesnetv2 import (
     _build_loss_fn,
+    _case_id_to_str,
     _format_epoch_metrics,
     _parse_export_epochs,
     _parse_export_splits,
@@ -46,6 +47,12 @@ from ratlesnetv2_finetune.scripts.split_prepared_dataset import split_prepared_d
 from ratlesnetv2_finetune.source_folders import add_source_folder_to_plan
 
 SPACING = (0.07, 0.07, 0.5)
+
+
+def test_case_id_to_str_uses_portable_case_directory_name():
+    assert _case_id_to_str("case_01") == "case_01"
+    assert _case_id_to_str("/kaggle/working/fold/validation/case_01/") == "case_01"
+    assert _case_id_to_str("C:\\fold\\validation\\case_01\\") == "case_01"
 
 
 def _write_nifti(path: Path, data: np.ndarray, spacing=SPACING) -> None:

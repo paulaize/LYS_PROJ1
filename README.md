@@ -29,6 +29,12 @@ The exact Kaggle cells and decision gates are in
 External-source inclusion and provenance are in
 [docs/ratlesnetv2_external_datasets.md](docs/ratlesnetv2_external_datasets.md).
 
+After the RatLesNetV2 OOF experiment, the explicit v2 architecture-comparator
+notebook can compare a paper-inspired An et al. (2023) network with nnU-Net v2
+on the same preserved development folds. It is a separate protocol and does
+not reopen the locked test:
+[notebooks/lys_v2_architecture_comparator_kaggle.ipynb](notebooks/lys_v2_architecture_comparator_kaggle.ipynb).
+
 ## Current datasets
 
 - `LYS_T2w_manual_v1`: 258 corrected target cases, expected spacing
@@ -79,6 +85,9 @@ ratlesnetv2_finetune/
     ├── create_grouped_cv.py           # locked test + five OOF folds
     ├── split_prepared_dataset.py      # external train/validation split
     ├── finetune_ratlesnetv2.py        # active trainer/exporter
+    ├── train_an2023_unet_adapted.py   # versioned paper-inspired comparator
+    ├── prepare_architecture_comparator.py
+    ├── compare_oof_candidates.py
     ├── calibrate_probability_threshold.py
     ├── evaluate_probability_ensemble.py
     └── ...                             # dataset rebuild/provenance utilities

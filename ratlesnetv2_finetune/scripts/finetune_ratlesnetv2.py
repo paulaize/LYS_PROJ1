@@ -1016,9 +1016,11 @@ def _case_id_to_str(value: Any) -> str:
         value = value.detach().cpu().numpy()
     if isinstance(value, np.ndarray):
         if value.shape == ():
-            return str(value.item())
-        return "_".join(str(v) for v in value.tolist())
-    return str(value)
+            value = value.item()
+        else:
+            value = "_".join(str(v) for v in value.tolist())
+    text = str(value).rstrip("/\\")
+    return text.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
 
 
 def _segmentation_metrics(pred: Any, target: Any, *, threshold: float = 0.5) -> dict[str, Any]:

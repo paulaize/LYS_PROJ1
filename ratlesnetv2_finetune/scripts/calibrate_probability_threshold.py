@@ -194,16 +194,47 @@ def _read_prediction_records(paths: list[Path]) -> list[dict[str, str]]:
                     "Threshold calibration accepts split='validation' only, "
                     f"got {split!r} in {path}"
                 )
-            case_id = _required(row, "case_id")
+            case_id = _canonical_prediction_case_id(row)
             if case_id in seen:
                 raise ValueError(
                     f"Duplicate out-of-fold case_id={case_id!r} in {seen[case_id]} and {path}"
                 )
             seen[case_id] = path
-            records.append(row)
+            record = dict(row)
+            record["case_id"] = case_id
+            records.append(record)
     if not records:
         raise ValueError("Prediction manifests contain no rows")
     return sorted(records, key=lambda row: row["case_id"])
+
+
+def _canonical_prediction_case_id(row: dict[str, str]) -> str:
+    """Return the prepared case-directory name from a manifest record.
+
+    Some upstream RatLesNetV2 dataset versions return the full case directory
+    as ``case_id``.  Prediction manifests therefore need to accept either that
+    path representation or the portable directory name used by split
+    manifests.  When ``case_dir`` is present, require both representations to
+    identify the same directory rather than guessing an identity.
+    """
+    raw = _required(row, "case_id")
+    case_id = _portable_path_name(raw)
+    case_dir = str(row.get("case_dir", "")).strip()
+    if case_dir:
+        directory_id = _portable_path_name(case_dir)
+        if directory_id != case_id:
+            raise ValueError(
+                "Prediction manifest case_id and case_dir disagree: "
+                f"case_id={raw!r}, case_dir={case_dir!r}"
+            )
+    return case_id
+
+
+def _portable_path_name(value: str) -> str:
+    stripped = str(value).strip().rstrip("/\\")
+    if not stripped:
+        raise ValueError("Prediction manifest contains an empty case path")
+    return stripped.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
 
 
 def _load_case(record: dict[str, str]) -> LoadedPrediction:

@@ -11,6 +11,7 @@ from ratlesnetv2_finetune.scripts.audit_prepared_dataset import (
     audit_prepared_dataset,
 )
 from ratlesnetv2_finetune.scripts.calibrate_probability_threshold import (
+    _canonical_prediction_case_id,
     calibrate_probability_threshold,
 )
 from ratlesnetv2_finetune.scripts.create_grouped_cv import (
@@ -316,6 +317,51 @@ def test_threshold_calibration_uses_validation_only_and_finds_best_threshold(tmp
         )
 
 
+def test_threshold_calibration_accepts_full_path_case_ids(tmp_path):
+    case_id = "case_00"
+    case_dir = tmp_path / "fold_0" / "validation" / case_id
+    case_dir.mkdir(parents=True)
+    target = np.zeros((5, 5, 2), dtype=np.uint8)
+    target[1:3, 1:3, 0] = 1
+    probability = np.where(target, 0.8, 0.1).astype(np.float32)
+    target_path = case_dir / "target_mask.nii.gz"
+    probability_path = case_dir / "lesion_probability.nii.gz"
+    _write_nifti(target_path, target)
+    _write_nifti(probability_path, probability)
+    manifest = tmp_path / "prediction_export_manifest.csv"
+    _write_csv(
+        manifest,
+        [
+            {
+                "case_id": f"{case_dir}/",
+                "case_dir": str(case_dir),
+                "split": "validation",
+                "target_mask": str(target_path),
+                "lesion_probability": str(probability_path),
+            }
+        ],
+    )
+
+    selection = calibrate_probability_threshold(
+        prediction_manifests=[manifest],
+        output_root=tmp_path / "calibration",
+        thresholds=[0.5],
+        bootstrap_samples=0,
+    )
+
+    assert selection["mean_dice"] == pytest.approx(1.0)
+    rows = _read_csv(tmp_path / "calibration" / "selected_threshold_case_metrics.csv")
+    assert rows[0]["case_id"] == case_id
+
+    with pytest.raises(ValueError, match="case_id and case_dir disagree"):
+        _canonical_prediction_case_id(
+            {
+                "case_id": "/fold/validation/case_00/",
+                "case_dir": "/fold/validation/different_case/",
+            }
+        )
+
+
 def test_locked_test_ensemble_requires_oof_threshold_and_averages_five_models(tmp_path):
     threshold_json = tmp_path / "selected_threshold.json"
     threshold_json.write_text(
@@ -345,7 +391,8 @@ def test_locked_test_ensemble_requires_oof_threshold_and_averages_five_models(tm
             _write_nifti(probability_path, probability)
             records.append(
                 {
-                    "case_id": f"case_{case_index}",
+                    "case_id": f"{case_dir}/",
+                    "case_dir": str(case_dir),
                     "split": "test",
                     "target_mask": str(target_path),
                     "lesion_probability": str(probability_path),
@@ -355,10 +402,48 @@ def test_locked_test_ensemble_requires_oof_threshold_and_averages_five_models(tm
         _write_csv(manifest, records)
         manifests.append(manifest)
 
+    metadata = tmp_path / "split_assignments.csv"
+    _write_csv(
+        metadata,
+        [
+            {
+                "case_id": f"case_{case_index}",
+                "outer_split": "test",
+                "subject_id": f"subject_{case_index}",
+                "cohort": "cohort_a",
+                "timepoint": "D1",
+                "lesion_volume_bin": "q1",
+            }
+            for case_index in range(2)
+        ],
+    )
+
+    mismatched_metadata = tmp_path / "mismatched_split_assignments.csv"
+    _write_csv(
+        mismatched_metadata,
+        [
+            {
+                "case_id": "different_case",
+                "outer_split": "test",
+            }
+        ],
+    )
+    rejected_output = tmp_path / "rejected_locked_test"
+    with pytest.raises(ValueError, match="metadata does not match"):
+        evaluate_probability_ensemble(
+            prediction_manifests=manifests,
+            threshold_json=threshold_json,
+            metadata_path=mismatched_metadata,
+            output_root=rejected_output,
+            expected_models=5,
+        )
+    assert not rejected_output.exists()
+
     output = tmp_path / "locked_test"
     summary = evaluate_probability_ensemble(
         prediction_manifests=manifests,
         threshold_json=threshold_json,
+        metadata_path=metadata,
         output_root=output,
         expected_models=5,
         bootstrap_samples=20,
@@ -368,6 +453,7 @@ def test_locked_test_ensemble_requires_oof_threshold_and_averages_five_models(tm
     assert summary["evaluation_data"] == "locked_test_once"
     assert summary["postprocessing"] == "none"
     assert len(_read_csv(output / "locked_test_case_metrics.csv")) == 2
+    assert len(_read_csv(output / "locked_test_subgroups.csv")) == 3
     assert len(_read_csv(output / "ensemble_prediction_manifest.csv")) == 2
     with pytest.raises(FileExistsError, match="Do not rerun"):
         evaluate_probability_ensemble(

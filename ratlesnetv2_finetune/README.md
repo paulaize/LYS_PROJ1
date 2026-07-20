@@ -21,6 +21,23 @@ rules, or test gate.
 | `calibrate_probability_threshold` | select a threshold from validation-only OOF maps |
 | `evaluate_probability_ensemble` | evaluate the frozen five-model locked-test ensemble once |
 
+## Versioned architecture comparator
+
+The separate post-RatLesNetV2 comparator is executed by
+[`notebooks/lys_v2_architecture_comparator_kaggle.ipynb`](../notebooks/lys_v2_architecture_comparator_kaggle.ipynb).
+It reuses the preserved LYS development folds, omits locked-test images, and
+adds three focused modules:
+
+| Module | Purpose |
+|---|---|
+| `train_an2023_unet_adapted` | train the transparent paper-inspired full-field comparator |
+| `prepare_architecture_comparator` | stage preserved folds, convert nnU-Net data, and export native OOF probabilities |
+| `compare_oof_candidates` | produce paired case/fold/cohort comparisons from calibrated OOF reports |
+| `create_oof_qc_contact_sheet` | render development-only scan/manual/prediction/error PNG QC |
+
+This is an explicit v2 protocol, not an alternative path inside the active v1
+RatLesNetV2 experiment. It does not evaluate a locked test.
+
 Run help locally through the existing environment:
 
 ```bash

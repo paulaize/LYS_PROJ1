@@ -1,6 +1,6 @@
 # Documentation
 
-This training branch intentionally keeps only two detailed references:
+This training branch intentionally keeps three detailed references:
 
 1. [ratlesnetv2_lys_v1_kaggle_workflow.md](ratlesnetv2_lys_v1_kaggle_workflow.md)
    — active step-by-step experiment, decision gates, frozen test, and artifact
@@ -8,6 +8,10 @@ This training branch intentionally keeps only two detailed references:
 2. [ratlesnetv2_external_datasets.md](ratlesnetv2_external_datasets.md) — source
    selection, deduplication, geometry, orientation, and provenance for the
    external-mouse comparator.
+3. [lys_v2_architecture_comparator_protocol.md](lys_v2_architecture_comparator_protocol.md)
+   — the separate post-RatLesNetV2 An et al./nnU-Net v2 OOF comparator. Its
+   executable notebook is
+   [../notebooks/lys_v2_architecture_comparator_kaggle.ipynb](../notebooks/lys_v2_architecture_comparator_kaggle.ipynb).
 
 Use [../AGENTS.md](../AGENTS.md) for branch rules and [../README.md](../README.md)
 for orientation. Preparation utility details live in
