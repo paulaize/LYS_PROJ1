@@ -226,7 +226,6 @@ def prepare_target_dataset(
         raise
     return report
 
-
 def prepare_external_dataset(
     *,
     input_root: Path,
