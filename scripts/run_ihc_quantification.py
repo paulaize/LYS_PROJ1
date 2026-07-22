@@ -72,10 +72,19 @@ TIDY_FIELDS = [
     "artifact_annotation_names",
     "artifact_annotation_count",
     "artifact_excluded_area_um2",
+    "tissue_area_um2",
+    "total_area_um2",
+    "valid_analyzed_area_um2",
+    "igg_fitc_pos_area_um2",
+    "igg_fitc_mean_intensity",
     "igg_fitc_channel_index",
     "igg_fitc_threshold",
     "threshold_status",
     "downsample",
+    "pixel_width_um",
+    "pixel_height_um",
+    "analysis_resolution_um_x",
+    "analysis_resolution_um_y",
     "qc_flag",
 ]
 
@@ -211,6 +220,7 @@ def build_quantification_commands(
     tidy_csv: str | Path | None = None,
     limit: int | None = None,
     use_default_signoff: bool = True,
+    threshold_status_override: str | None = None,
 ) -> list[QuantificationCommand]:
     from src.config import load_config
 
@@ -259,6 +269,10 @@ def build_quantification_commands(
             exploratory=exploratory,
             use_default_signoff=use_default_signoff,
         )
+        if threshold_status_override is not None:
+            if not exploratory:
+                raise ValueError("threshold_status_override is only valid in exploratory mode")
+            threshold_status = str(threshold_status_override)
         channel_index = cfg.panel_igg_fitc_channel_index(panel)
         for vsi in panel_cfg.get("vsi_files") or []:
             vsi_path = cfg.resolve_input_path(vsi)
@@ -347,6 +361,7 @@ def run_quantification(
     append: bool = False,
     timeout_seconds: int | None = 600,
     use_default_signoff: bool = True,
+    threshold_status_override: str | None = None,
 ) -> list[QuantificationCommand]:
     commands = build_quantification_commands(
         config_path,
@@ -361,6 +376,7 @@ def run_quantification(
         tidy_csv=tidy_csv,
         limit=limit,
         use_default_signoff=use_default_signoff,
+        threshold_status_override=threshold_status_override,
     )
     if not commands:
         raise ValueError("No IHC quantification commands were generated.")

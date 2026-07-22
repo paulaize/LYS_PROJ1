@@ -105,23 +105,43 @@ Implemented:
 - `export_measurements.groovy`: final measurement exporter requiring
   `tissue_v1` and supporting `artifact_exclude` subtraction.
 - `ingest_qupath(csv_path)`: QuPath CSV to tidy Python rows.
+- `make ihc-one-animal`: Qt-free Python orchestration for isolated source-bundle
+  validation, diagnostics, section QC, separate panel sweeps/review artifacts,
+  deterministic exploratory candidate selection, target quantification, tidy
+  ingestion, and combined run/QC manifests.
+
+Current runnable exploratory command:
+
+```bash
+make ihc-one-animal \
+  CONFIG=config/animals/BD_08_5D.yml \
+  RUN_ARGS="--panels A,B --mode exploratory --allow-auto-candidate --run"
+```
+
+The 2026-07-22 clean real-data run wrote
+`work/BD_08_5D/ihc_one_animal/20260722T152825Z_04c18024aecf/`.
+Both panels produced complete numeric threshold-sensitivity tables. Panel A
+selected threshold 250 as an automatic exploratory candidate and produced
+three target-section measurements (nine tidy measure rows). Panel B had no
+passing candidate and therefore correctly produced no single-threshold target
+measurements. This is a technical exploratory result, not scientific approval.
 
 Generated so far:
 
 - Panel A `section_01` target/control threshold sweep CSV.
 - Panel A `section_01` target/control threshold-review PNGs.
 - Section-QC manifest and thumbnails for Panel A target/control.
-- Section-QC manifest and thumbnails for Panel B target plus C6S5 Panel B
-  `section_01`.
-- Failure rows for C6S5 Panel B `section_02..section_08`, which do not open
-  through the current direct Bio-Formats CLI series mapping.
+- Historical section-QC outputs for the former C6S5 Panel B source are stale
+  and must not be reused for the updated source bundle.
 - The section-QC manifest has one row for every expected target/control panel
   section combination: 32 rows total, with failed or suspect sections flagged.
 - Section selections are now recorded per panel in YAML:
   - BD_08_5D Panel A: `section_01`, `section_03`, `section_06`
   - C6S5 Panel A: `section_05`, `section_06`, `section_07`
   - BD_08_5D Panel B: `section_05`, `section_06`, `section_08`
-  - C6S5 Panel B: unavailable/corrupted, excluded from calibration
+  - C6S5 Panel B: human selection pending; exploratory runs may use every
+    metadata-valid section that completes pixel reading, with status
+    `technical_open_only_unreviewed`
 
 Important caveat:
 
@@ -133,11 +153,13 @@ Important caveat:
 - BD_08_5D Panel B configured `section_04` and `section_07` opened with one
   readable channel instead of the configured 4. Paul confirmed those images
   were not saved properly, so they are excluded.
-- C6S5 Panel B `section_01` opens as a 600 x 207, 3-channel macro-sized image.
-  C6S5 Panel B `section_02..section_08` do not open through direct CLI series
-  selection. Paul confirmed the C6S5 Panel B file is corrupted/unavailable for
-  now, so Panel B must proceed without this control and stay exploratory unless
-  a replacement control or approved fallback threshold is added.
+- The updated C6S5 Panel B source bundle was technically checked with QuPath
+  0.7/Bio-Formats on 2026-07-22. Series 2-9 open as `section_01..section_08`,
+  expose four channels, report approximately 0.325 x 0.325 um/pixel, and accept
+  IgG-FITC channel index 1. These facts make the sections eligible for
+  exploratory calibration only. Human section selection and visual QC remain
+  pending, so refreshed diagnostics and section-QC outputs are required before
+  use and must carry `technical_open_only_unreviewed`.
 
 ## Required v1 Workflow
 
@@ -207,16 +229,19 @@ make ihc-threshold-review CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel A
 Panel A schedules six selected sections: three BD_08_5D target sections and
 three C6S5 no-LYS241 control sections.
 
-Panel B currently schedules only BD_08_5D target sections:
+Panel B schedules the selected BD_08_5D target sections and, in exploratory
+mode, all C6S5 control sections that pass technical opening, channel,
+calibration, tissue-detection, and measurement checks:
 
 ```bash
 make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel B"
 make ihc-threshold-review CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel B"
 ```
 
-Because C6S5 Panel B is corrupted/unavailable, Panel B IgG-FITC positive-area
-outputs must be labeled `exploratory_no_panel_b_control` until a valid Panel B
-control or explicit fallback calibration rule is approved.
+The C6S5 Panel B control sections are not human-selected or visually approved.
+Every exploratory control row must therefore be labeled
+`technical_open_only_unreviewed`, and per-section failures must be retained
+without discarding successful control sections.
 
 Outputs:
 
@@ -456,14 +481,13 @@ Future direction:
 
 ## Immediate Coding Queue
 
-1. Review `work/BD_08_5D/ihc_section_qc_manifest.csv` and the section-QC
-   thumbnails.
-2. Fix or document the suspect series mappings exposed by section QC.
-3. Select usable sections in config.
-4. Re-run threshold sweeps/review thumbnails on selected Panel A sections.
-5. Resolve Panel B control section availability before Panel B calibration.
-6. Add threshold sign-off records.
-7. Make final IHC export deterministic and duplicate-safe.
-8. Export one selected Panel A and one selected Panel B section with approved
-   thresholds.
-9. Ingest final IHC rows and join with the reviewed MRI animal-level row.
+1. Review the new Panel A/B section-QC and threshold-overlay artifacts.
+2. Human-select C6S5 Panel B control sections; they remain
+   `technical_open_only_unreviewed`.
+3. Establish acquisition compatibility, especially the Panel A target/control
+   pixel-size difference, before comparing raw intensities scientifically.
+4. Review/correct `tissue_v1` and add `artifact_exclude` annotations.
+5. Approve Panel A and Panel B thresholds separately; Panel B currently has no
+   automatic candidate under the configured criteria.
+6. Re-run in final mode only after all human/scientific gates are satisfied.
+7. Join final IHC rows with the reviewed MRI animal-level row.

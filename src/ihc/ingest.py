@@ -16,7 +16,6 @@ EXPECTED_COLUMNS = {
     "region",
     "igg_fitc_pos_area_um2",
     "total_area_um2",
-    "dapi_count",
 }
 
 
@@ -69,8 +68,7 @@ def ingest_qupath(csv_path: str | Path) -> list[dict]:
         total_mm2 = total_um2 / 1e6 if total_um2 > 0 else float("nan")
         pos_um2 = _safe_float(r["igg_fitc_pos_area_um2"])
         pct = (pos_um2 / total_um2 * 100.0) if total_um2 > 0 else float("nan")
-        dapi_raw = _safe_float(r["dapi_count"])
-        dapi_density = (dapi_raw / total_mm2) if (total_mm2 > 0 and dapi_raw >= 0) else float("nan")
+        mean_intensity = _optional_float(r, "igg_fitc_mean_intensity")
 
         base = {
             "source_animal": _optional_value(r, "source_animal"),
@@ -85,10 +83,22 @@ def ingest_qupath(csv_path: str | Path) -> list[dict]:
             "artifact_annotation_names": _optional_value(r, "artifact_annotation_names"),
             "artifact_annotation_count": _optional_value(r, "artifact_annotation_count"),
             "artifact_excluded_area_um2": _optional_float(r, "artifact_excluded_area_um2"),
+            "tissue_area_um2": _optional_float(r, "tissue_area_um2"),
+            "total_area_um2": total_um2,
+            "valid_analyzed_area_um2": _optional_float(
+                r, "valid_analyzed_area_um2"
+            )
+            or total_um2,
+            "igg_fitc_pos_area_um2": pos_um2,
+            "igg_fitc_mean_intensity": mean_intensity,
             "igg_fitc_channel_index": _optional_value(r, "igg_fitc_channel_index"),
             "igg_fitc_threshold": _optional_value(r, "igg_fitc_threshold"),
             "threshold_status": _optional_value(r, "threshold_status"),
             "downsample": _optional_value(r, "downsample"),
+            "pixel_width_um": _optional_float(r, "pixel_width_um"),
+            "pixel_height_um": _optional_float(r, "pixel_height_um"),
+            "analysis_resolution_um_x": _optional_float(r, "analysis_resolution_um_x"),
+            "analysis_resolution_um_y": _optional_float(r, "analysis_resolution_um_y"),
             "qc_flag": r.get("qc_flag", "v1_area_only"),
         }
         rows.append(
@@ -105,12 +115,24 @@ def ingest_qupath(csv_path: str | Path) -> list[dict]:
         rows.append(
             {
                 **base,
-                "marker": "DAPI",
-                "cell_type": "nuclei",
-                "measure": "dapi_density",
-                "value": dapi_density,
-                "unit": "nuclei_per_mm2",
-                "n_cells": int(dapi_raw) if dapi_raw >= 0 else "",
+                "marker": "IgG-FITC",
+                "cell_type": "all",
+                "measure": "igg_fitc_positive_area",
+                "value": pos_um2 / 1e6,
+                "unit": "mm2",
+                "n_cells": "",
             }
         )
+        if mean_intensity != "":
+            rows.append(
+                {
+                    **base,
+                    "marker": "IgG-FITC",
+                    "cell_type": "all",
+                    "measure": "igg_fitc_mean_intensity",
+                    "value": mean_intensity,
+                    "unit": "raw_intensity_au",
+                    "n_cells": "",
+                }
+            )
     return rows

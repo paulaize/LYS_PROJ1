@@ -148,6 +148,7 @@ def build_sweep_commands(
     limit: int | None = None,
     include_target: bool = True,
     include_controls: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[SweepCommand]:
     from src.config import load_config
 
@@ -177,6 +178,7 @@ def build_sweep_commands(
     tissue_name = ihc_cfg.get("qupath", {}).get("tissue_annotation_name", "tissue_v1")
     script = cfg.repo_root / "src/ihc/qupath/export_threshold_sweep.groovy"
     commands: list[SweepCommand] = []
+    output_base = Path(output_dir) if output_dir is not None else cfg.work_dir()
 
     def add_source(source_cfg, source_role: str, panel: str) -> None:
         source_ihc = source_cfg.animal.get("ihc", {})
@@ -184,7 +186,7 @@ def build_sweep_commands(
         source_qupath = source_ihc.get("qupath", {})
         channel_index = source_cfg.panel_igg_fitc_channel_index(panel)
         artifact_arg = _artifact_annotation_arg(source_qupath)
-        out_csv = cfg.work_dir() / f"ihc_threshold_sweep_panel_{panel}.csv"
+        out_csv = output_base / f"ihc_threshold_sweep_panel_{panel}.csv"
 
         for vsi in source_panel.get("vsi_files") or []:
             vsi_path = source_cfg.resolve_input_path(vsi)
@@ -259,6 +261,7 @@ def build_section_qc_commands(
     limit: int | None = None,
     include_target: bool = True,
     include_controls: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[SectionQcCommand]:
     from src.config import load_config
 
@@ -278,7 +281,8 @@ def build_section_qc_commands(
 
     section_qc_cfg = cfg.pipeline.get("ihc", {}).get("section_qc", {})
     max_thumbnail_px = int(section_qc_cfg.get("max_thumbnail_px", 1400))
-    manifest_csv = cfg.work_dir() / "ihc_section_qc_manifest.csv"
+    output_base = Path(output_dir) if output_dir is not None else cfg.work_dir()
+    manifest_csv = output_base / "ihc_section_qc_manifest.csv"
     script = cfg.repo_root / "src/ihc/qupath/export_section_qc_thumbnail.groovy"
     commands: list[SectionQcCommand] = []
 
@@ -304,7 +308,7 @@ def build_section_qc_commands(
                 apply_selection=False,
             ):
                 out_dir = (
-                    cfg.work_dir()
+                    output_base
                     / "ihc_section_qc"
                     / f"panel_{panel}"
                     / f"{source_cfg.animal_id}_{source_role}"
@@ -378,6 +382,7 @@ def build_review_thumbnail_commands(
     limit: int | None = None,
     include_target: bool = True,
     include_controls: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[ReviewThumbnailCommand]:
     from src.config import load_config
 
@@ -408,6 +413,7 @@ def build_review_thumbnail_commands(
     tissue_name = ihc_cfg.get("qupath", {}).get("tissue_annotation_name", "tissue_v1")
     script = cfg.repo_root / "src/ihc/qupath/export_threshold_review_thumbnails.groovy"
     commands: list[ReviewThumbnailCommand] = []
+    output_base = Path(output_dir) if output_dir is not None else cfg.work_dir()
 
     def add_source(source_cfg, source_role: str, panel: str) -> None:
         source_ihc = source_cfg.animal.get("ihc", {})
@@ -415,6 +421,7 @@ def build_review_thumbnail_commands(
         source_qupath = source_ihc.get("qupath", {})
         channel_index = source_cfg.panel_igg_fitc_channel_index(panel)
         artifact_arg = _artifact_annotation_arg(source_qupath)
+        review_downsample = float(source_panel.get("threshold_review_downsample", downsample))
 
         for vsi in source_panel.get("vsi_files") or []:
             vsi_path = source_cfg.resolve_input_path(vsi)
@@ -422,7 +429,7 @@ def build_review_thumbnail_commands(
                 continue
             for series_index, section_id in _section_items(source_qupath, sections, source_panel):
                 out_dir = (
-                    cfg.work_dir()
+                    output_base
                     / "ihc_threshold_review"
                     / f"panel_{panel}"
                     / f"{source_cfg.animal_id}_{source_role}"
@@ -434,7 +441,7 @@ def build_review_thumbnail_commands(
                         str(out_dir),
                         str(channel_index),
                         threshold_arg,
-                        str(downsample),
+                        str(review_downsample),
                         tissue_name,
                         section_id,
                         "auto_if_missing",
@@ -497,6 +504,7 @@ def build_diagnostic_commands(
     limit: int | None = None,
     include_target: bool = True,
     include_controls: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[DiagnosticCommand]:
     from src.config import load_config
 
@@ -517,7 +525,8 @@ def build_diagnostic_commands(
     tissue_name = ihc_cfg.get("qupath", {}).get("tissue_annotation_name", "tissue_v1")
     _ = tissue_name  # keep diagnostics tied to the same v1 QuPath config block.
     script = cfg.repo_root / "src/ihc/qupath/diagnose_image.groovy"
-    out_csv = cfg.work_dir() / "ihc_qupath_diagnostics.csv"
+    output_base = Path(output_dir) if output_dir is not None else cfg.work_dir()
+    out_csv = output_base / "ihc_qupath_diagnostics.csv"
     commands: list[DiagnosticCommand] = []
 
     def add_source(source_cfg, source_role: str, panel: str) -> None:
@@ -598,6 +607,7 @@ def run_section_qc(
     timeout_seconds: int | None = 600,
     include_target: bool = True,
     include_controls: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[SectionQcCommand]:
     commands = build_section_qc_commands(
         config_path,
@@ -606,6 +616,7 @@ def run_section_qc(
         limit=limit,
         include_target=include_target,
         include_controls=include_controls,
+        output_dir=output_dir,
     )
     if not commands:
         raise ValueError("No IHC section-QC commands were generated.")
@@ -743,6 +754,7 @@ def run_review_thumbnails(
     timeout_seconds: int | None = 600,
     include_target: bool = True,
     include_controls: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[ReviewThumbnailCommand]:
     commands = build_review_thumbnail_commands(
         config_path,
@@ -751,6 +763,7 @@ def run_review_thumbnails(
         limit=limit,
         include_target=include_target,
         include_controls=include_controls,
+        output_dir=output_dir,
     )
     if not commands:
         raise ValueError("No IHC threshold review-thumbnail commands were generated.")
@@ -797,6 +810,7 @@ def run_threshold_sweeps(
     timeout_seconds: int | None = 600,
     include_target: bool = True,
     include_controls: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[SweepCommand]:
     commands = build_sweep_commands(
         config_path,
@@ -805,6 +819,7 @@ def run_threshold_sweeps(
         limit=limit,
         include_target=include_target,
         include_controls=include_controls,
+        output_dir=output_dir,
     )
     if not commands:
         raise ValueError("No IHC threshold sweep commands were generated.")
@@ -853,6 +868,7 @@ def run_diagnostics(
     timeout_seconds: int | None = 180,
     include_target: bool = True,
     include_controls: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[DiagnosticCommand]:
     commands = build_diagnostic_commands(
         config_path,
@@ -861,6 +877,7 @@ def run_diagnostics(
         limit=limit,
         include_target=include_target,
         include_controls=include_controls,
+        output_dir=output_dir,
     )
     if not commands:
         raise ValueError("No IHC diagnostic commands were generated.")

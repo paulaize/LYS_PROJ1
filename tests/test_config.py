@@ -107,16 +107,33 @@ def test_control_animal_config_records_ihc_without_mri():
             cfg.panel_igg_fitc_threshold(panel)
 
 
-def test_control_config_records_panel_a_selection_and_panel_b_unavailable():
+def test_control_config_records_panel_a_selection_and_panel_b_available_unreviewed():
     cfg = load_config("config/animals/C6S5.yml", repo_root=REPO)
     assert cfg.panel_config("A")["section_selection"]["selected_section_ids"] == [
         "section_05",
         "section_06",
         "section_07",
     ]
-    assert cfg.panel_config("B")["control_status"] == "corrupted_unavailable"
-    assert cfg.panel_config("B")["exclude_from_threshold_calibration"] is True
+    panel_b = cfg.panel_config("B")
+    assert panel_b["control_status"] == "available_pending_visual_qc"
+    assert panel_b["exclude_from_threshold_calibration"] is False
     assert cfg.panel_config("B")["section_selection"]["selected_section_ids"] == []
+    assert cfg.panel_config("B")["section_selection"]["excluded_section_ids"] == []
+    assert (
+        cfg.panel_config("B")["section_selection"]["exploratory_control_selection_status"]
+        == "technical_open_only_unreviewed"
+    )
+
+
+def test_real_ihc_configs_record_complete_olympus_source_bundles():
+    for animal_id in ("BD_08_5D", "C6S5"):
+        cfg = load_config(f"config/animals/{animal_id}.yml", repo_root=REPO)
+        for panel in ("A", "B"):
+            panel_cfg = cfg.panel_config(panel)
+            bundles = panel_cfg["source_bundles"]
+            assert len(bundles) == 1
+            assert bundles[0]["vsi_file"] == panel_cfg["vsi_files"][0]
+            assert bundles[0]["companion_dir"].endswith("_")
 
 
 def test_real_v1_animal_records_qupath_series_layout():

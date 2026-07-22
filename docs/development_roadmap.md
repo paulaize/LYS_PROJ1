@@ -34,9 +34,18 @@ IHC:
 - Target/control `.vsi` files configured.
 - QuPath diagnostics, threshold sweeps, and threshold review thumbnails exist.
 - Section-QC thumbnail/manifest export exists.
-- Panel A `section_01` smoke tests ran, but the C6S5 control section is
-  damaged and not suitable for final threshold approval.
-- Next blocker is section QC and section selection.
+- Panel-specific section selections and exploratory threshold tooling exist.
+- The updated C6S5 Panel B bundle is technically available as of 2026-07-22;
+  all eight section series require freshly generated QC and remain
+  `technical_open_only_unreviewed` until human selection.
+- The active target is one isolated two-panel exploratory run with complete
+  bundle checksums, per-section failures, separate automatic candidates, and
+  deterministic tidy outputs.
+- A clean real-data run completed on 2026-07-22. Panel A produced an automatic
+  exploratory candidate and target rows; Panel B produced a complete
+  sensitivity table but no passing candidate. Remaining blockers are human
+  section/tissue/artifact review, acquisition compatibility, and separate
+  threshold approval—not technical file access.
 
 v1 acceptance:
 

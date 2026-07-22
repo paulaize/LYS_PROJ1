@@ -1,6 +1,6 @@
 # v1 Next-Session TODO
 
-Last cleaned: 2026-07-08
+Last cleaned: 2026-07-22
 
 This is the short execution checklist for the next development session. The
 IHC strategy lives in `docs/IHC_v1_plan.md`. The full project roadmap lives in
@@ -37,6 +37,22 @@ Implemented:
 - QuPath exporters for threshold sweep, threshold review thumbnails, tissue ROI
   draft, and final tissue-only measurement export.
 - Python ingestion of QuPath CSVs.
+- `make ihc-one-animal`, which writes a fresh versioned run with complete
+  source-bundle checksums, panel-separated diagnostics/QC/sweeps/review
+  artifacts, automatic exploratory candidate records, deterministic tidy
+  outputs, and combined manifests.
+
+Latest clean technical run:
+
+- path: `work/BD_08_5D/ihc_one_animal/20260722T152825Z_04c18024aecf/`
+- exit code: 0; per-section failures: 0
+- Panel A: passing candidates 250 and 500; deterministic exploratory choice
+  250; three successful target sections; nine tidy rows
+- Panel B: all three target and eight control analysis sections technically
+  succeeded; no configured threshold passed the plausibility criteria; no
+  single-threshold measurement was fabricated
+- both panels: eight-row numeric threshold-sensitivity tables and complete
+  review artifacts
 
 Generated:
 
@@ -47,14 +63,15 @@ Generated:
   `work/BD_08_5D/ihc_section_qc_manifest.csv`.
 - Section-QC thumbnails:
   `work/BD_08_5D/ihc_section_qc/`.
-- The manifest has 32 rows: target/control x Panel A/B x 8 configured
-  sections. There are 25 thumbnails because C6S5 Panel B sections 02-08 fail
-  before thumbnail export.
+- The historical 32-row section-QC manifest predates the updated C6S5 Panel B
+  source bundle. Its Panel B control rows/thumbnails are stale and must not be
+  reused; regenerate them in a fresh run directory.
 - Usable sections are now recorded per panel in config:
   - BD_08_5D Panel A: `section_01`, `section_03`, `section_06`
   - C6S5 Panel A: `section_05`, `section_06`, `section_07`
   - BD_08_5D Panel B: `section_05`, `section_06`, `section_08`
-  - C6S5 Panel B: unavailable/corrupted, excluded from threshold calibration
+  - C6S5 Panel B: human selection pending; exploratory calibration may use
+    metadata-valid, pixel-readable sections as `technical_open_only_unreviewed`
 
 Important caveat:
 
@@ -66,11 +83,10 @@ Important caveat:
   - BD_08_5D Panel B `section_04` and `section_07` opened with only one
     readable channel instead of the configured 4. Paul confirmed these images
     were not saved properly, so they are excluded.
-  - C6S5 Panel B `section_01` produced a macro-sized 600 x 207, 3-channel
-    thumbnail.
-  - C6S5 Panel B `section_02..section_08` failed to open through the configured
-    Bio-Formats series indices. Paul confirmed the Panel B control file is
-    corrupted/unavailable for now.
+  - The updated C6S5 Panel B bundle was checked on 2026-07-22: series 2-9 open,
+    map to all eight section IDs, expose four channels and approximately
+    0.325 x 0.325 um/pixel, and accept IgG-FITC channel index 1. This is
+    technical availability, not human section QC or approval.
 
 ## Confirmed Rules
 
@@ -88,7 +104,7 @@ Important caveat:
 - QuPath handles `.vsi` IO/review/export; Python handles orchestration,
   validation, provenance, and joins.
 
-## Next Work, In Order
+## Workflow Reference And Remaining Human Gates
 
 ### 1. Keep Section QC As Provenance
 
@@ -126,15 +142,14 @@ If a configured series cannot be opened, the command should record
 `section_qc_status=failed_qupath_open`; treat that section as excluded until
 the series layout is corrected.
 
-### 2. Accept Panel B Control Unavailable For v1
+### 2. Regenerate Updated Panel B Control QC
 
-For now, do not block development on C6S5 Panel B. It is marked
-`control_status: corrupted_unavailable` and
-`exclude_from_threshold_calibration: true`.
-
-Panel B target processing may continue, but Panel B IgG-FITC positive-area
-outputs must be flagged as exploratory/no Panel B control until a valid control
-or approved fallback threshold rule exists.
+C6S5 Panel B is marked `control_status: available_pending_visual_qc` and is
+eligible for exploratory calibration. Regenerate diagnostics, section-QC
+thumbnails, and manifests from the updated `.vsi` plus companion `.ets` bundle.
+Use all technically valid sections that complete pixel reading, label each
+`technical_open_only_unreviewed`, and retain structured failures per section.
+Do not claim that the sections are human-selected, QC-passing, or approved.
 
 ### 3. Run Panel A Calibration On Selected Sections
 
@@ -208,23 +223,27 @@ target/control fold >= 5
 For the current direct-image Panel A sweep, this proposes `250` and `500`.
 Use the page to download a manual decision JSON after reviewing thumbnails.
 
-### 6. Run Panel B Target-Only Exploratory Sweeps
+### 6. Run Panel B Exploratory Target/Control Sweeps
 
-Panel B has no usable configured control for now:
+Panel B uses selected target sections and technically readable updated control
+sections, while preserving their unreviewed status:
 
 ```bash
 make ihc-threshold-sweeps CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel B --run"
 make ihc-threshold-review CONFIG=config/animals/BD_08_5D.yml RUN_ARGS="--panel B --run"
 ```
 
-Dry-run check already schedules only:
+The target schedule remains:
 
 ```text
 BD_08_5D Panel B: section_05, section_06, section_08
 ```
 
-These outputs are useful for development and review, but not final
-control-calibrated Panel B IgG-FITC claims.
+The control schedule is all eight configured sections, filtered by actual
+technical/pixel-read success. These outputs are useful for development and
+review, but are not final control-calibrated Panel B claims until human control
+selection, tissue/artifact review, acquisition compatibility, and threshold
+sign-off are complete.
 
 ### 7. Add Threshold Sign-Off
 

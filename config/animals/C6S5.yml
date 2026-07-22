@@ -54,6 +54,9 @@ ihc:
       vsi_dir: "data/C6S5/IHC/panel_A"
       vsi_files:
         - "data/C6S5/IHC/panel_A/BD_08_C6S5 C-_01.vsi"
+      source_bundles:
+        - vsi_file: "data/C6S5/IHC/panel_A/BD_08_C6S5 C-_01.vsi"
+          companion_dir: "data/C6S5/IHC/panel_A/_BD_08_C6S5 C-_01_"
       overview_vsi: null
       section_selection:
         status: "selected_by_visual_qc"
@@ -90,26 +93,25 @@ ihc:
       vsi_dir: "data/C6S5/IHC/panel_B"
       vsi_files:
         - "data/C6S5/IHC/panel_B/BD_08_C6S5 C- IBA1 GFAP IgG_01.vsi"
+      source_bundles:
+        - vsi_file: "data/C6S5/IHC/panel_B/BD_08_C6S5 C- IBA1 GFAP IgG_01.vsi"
+          companion_dir: "data/C6S5/IHC/panel_B/_BD_08_C6S5 C- IBA1 GFAP IgG_01_"
       overview_vsi: null
-      control_status: "corrupted_unavailable"
-      exclude_from_threshold_calibration: true
+      control_status: "available_pending_visual_qc"
+      exclude_from_threshold_calibration: false
       section_selection:
-        status: "control_unavailable_file_corrupted"
-        selection_source: "Paul file check (2026-07-08)"
+        status: "available_pending_visual_qc"
+        selection_source: "QuPath 0.7/Bio-Formats technical diagnostic (2026-07-22)"
         selected_section_ids: []
-        excluded_section_ids:
-          - "section_01"
-          - "section_02"
-          - "section_03"
-          - "section_04"
-          - "section_05"
-          - "section_06"
-          - "section_07"
-          - "section_08"
+        excluded_section_ids: []
+        exploratory_control_selection_status: "technical_open_only_unreviewed"
         notes: >
-          Paul could not find a working C6S5 Panel B VSI file. The configured
-          file is treated as corrupted/unavailable for now. Do not use C6S5
-          Panel B for IgG-FITC threshold calibration.
+          Updated source bundle verified with QuPath 0.7/Bio-Formats on
+          2026-07-22. Series 2-9 open as section_01-section_08 with four
+          channels, approximately 0.325 um/pixel, and valid IgG-FITC channel
+          index 1. Exploratory calibration may use metadata-valid sections
+          that complete pixel reading, labeled technical_open_only_unreviewed.
+          Human section selection and visual QC remain pending.
       channel_map:
         0: "DAPI"
         1: "IgG-FITC"

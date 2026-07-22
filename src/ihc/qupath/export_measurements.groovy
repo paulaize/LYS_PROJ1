@@ -100,6 +100,7 @@ long iggFitcPosPx = 0
 long totalPx = 0
 long tissuePx = 0
 long artifactExcludedPx = 0
+double iggFitcIntensitySum = 0.0
 for (int y = 0; y < H; y++) {
     for (int x = 0; x < W; x++) {
         double fullX = reqX + (x + 0.5) * downsample
@@ -112,6 +113,7 @@ for (int y = 0; y < H; y++) {
         }
         totalPx++
         double v = raster.getSampleDouble(x, y, IGG_FITC_CH)
+        iggFitcIntensitySum += v
         if (v > IGG_FITC_THRESHOLD) iggFitcPosPx++
     }
 }
@@ -125,18 +127,19 @@ double totalAreaUm2 = totalPx * scale
 double tissueAreaUm2 = tissuePx * scale
 double artifactExcludedAreaUm2 = artifactExcludedPx * scale
 double iggFitcPctPositiveArea = iggFitcPosAreaUm2 / totalAreaUm2 * 100.0
-
-// DAPI count placeholder. Milestone 2 replaces with StarDist/InstanSeg.
-int dapiCount = -1
+double iggFitcMeanIntensity = iggFitcIntensitySum / totalPx
+double analysisResolutionUmX = downsample * umPerPxX
+double analysisResolutionUmY = downsample * umPerPxY
 
 def name = getProjectEntry() ? getProjectEntry().getImageName() : server.getMetadata().getName()
 def tissueQc = tissueCreated ? "rough_tissue_auto_unreviewed" : (tissueMode == "require_reviewed" ? "tissue_annotation_present_review_required" : "tissue_annotation_present")
-def thresholdQc = thresholdStatus == "approved" ? "" : ";threshold_${thresholdStatus}"
+def thresholdFlag = thresholdStatus.startsWith("threshold_") ? thresholdStatus : "threshold_${thresholdStatus}"
+def thresholdQc = thresholdStatus == "approved" ? "" : ";${thresholdFlag}"
 def artifactQc = artifactRois.isEmpty() ? ";no_artifact_exclusion_annotations" : ";artifact_excluded"
 def tissueQcFlag = tissueCreated ? ";rough_tissue_auto_unreviewed" : ";${tissueQc}"
 def qcFlag = "v1_tissue_area_only${thresholdQc}${artifactQc}${tissueQcFlag}"
-def header = "source_animal,source_role,image,panel,section_id,region,tissue_annotation,tissue_qc,artifact_annotation_names,artifact_annotation_count,igg_fitc_channel_index,igg_fitc_threshold,threshold_status,downsample,igg_fitc_pos_area_um2,total_area_um2,tissue_area_um2,artifact_excluded_area_um2,igg_fitc_pct_positive_area,dapi_count,qc_flag\n"
-def row = "${csv(sourceAnimal)},${csv(sourceRole)},${csv(name)},${csv(panel)},${csv(sectionId)},${csv(tissueName)},${csv(tissueName)},${csv(tissueQc)},${csv(artifactNames.join(';'))},${artifactRois.size()},${IGG_FITC_CH},${IGG_FITC_THRESHOLD},${csv(thresholdStatus)},${downsample},${iggFitcPosAreaUm2},${totalAreaUm2},${tissueAreaUm2},${artifactExcludedAreaUm2},${iggFitcPctPositiveArea},${dapiCount},${csv(qcFlag)}\n"
+def header = "source_animal,source_role,image,panel,section_id,region,tissue_annotation,tissue_qc,artifact_annotation_names,artifact_annotation_count,igg_fitc_channel_index,igg_fitc_threshold,threshold_status,downsample,pixel_width_um,pixel_height_um,analysis_resolution_um_x,analysis_resolution_um_y,igg_fitc_pos_area_um2,total_area_um2,valid_analyzed_area_um2,tissue_area_um2,artifact_excluded_area_um2,igg_fitc_pct_positive_area,igg_fitc_mean_intensity,qc_flag\n"
+def row = "${csv(sourceAnimal)},${csv(sourceRole)},${csv(name)},${csv(panel)},${csv(sectionId)},${csv(tissueName)},${csv(tissueName)},${csv(tissueQc)},${csv(artifactNames.join(';'))},${artifactRois.size()},${IGG_FITC_CH},${IGG_FITC_THRESHOLD},${csv(thresholdStatus)},${downsample},${umPerPxX},${umPerPxY},${analysisResolutionUmX},${analysisResolutionUmY},${iggFitcPosAreaUm2},${totalAreaUm2},${totalAreaUm2},${tissueAreaUm2},${artifactExcludedAreaUm2},${iggFitcPctPositiveArea},${iggFitcMeanIntensity},${csv(qcFlag)}\n"
 
 def f = new File(outPath)
 if (!f.exists()) f.text = header

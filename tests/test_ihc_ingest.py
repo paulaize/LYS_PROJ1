@@ -30,6 +30,9 @@ def test_ingest_qupath_uses_igg_fitc_names(tmp_path: Path):
     assert fitc["unit"] == "percent"
     assert fitc["area_mm2"] == 0.001
     assert "lys241" not in fitc["measure"].lower()
+    positive_area = [r for r in rows if r["measure"] == "igg_fitc_positive_area"][0]
+    assert positive_area["value"] == 0.00025
+    assert not any(r["measure"] == "dapi_density" for r in rows)
 
 
 def test_ingest_rejects_legacy_fitc_column(tmp_path: Path):

@@ -201,9 +201,9 @@ def _threshold_label(threshold: float) -> str:
     return f"{threshold:.3f}".rstrip("0").rstrip(".")
 
 
-def _qc_thumbnail(cfg: Config, ref: SectionRef) -> Path | None:
+def _qc_thumbnail(work_dir: Path, ref: SectionRef) -> Path | None:
     path = (
-        cfg.work_dir()
+        work_dir
         / "ihc_section_qc"
         / f"panel_{ref.panel}"
         / f"{ref.source_animal}_{ref.source_role}"
@@ -213,9 +213,9 @@ def _qc_thumbnail(cfg: Config, ref: SectionRef) -> Path | None:
     return path if path.exists() else None
 
 
-def _review_dir(cfg: Config, ref: SectionRef) -> Path:
+def _review_dir(work_dir: Path, ref: SectionRef) -> Path:
     return (
-        cfg.work_dir()
+        work_dir
         / "ihc_threshold_review"
         / f"panel_{ref.panel}"
         / f"{ref.source_animal}_{ref.source_role}"
@@ -243,10 +243,12 @@ def build_dashboard(
     max_control_pct: float = 1.0,
     min_target_pct: float = 0.05,
     min_target_control_fold: float = 5.0,
+    work_dir: str | Path | None = None,
 ) -> tuple[Path, Path, list[ThresholdSummary]]:
     cfg = load_config(config_path)
     panel = str(panel)
-    sweep_csv = cfg.work_dir() / f"ihc_threshold_sweep_panel_{panel}.csv"
+    work_dir = Path(work_dir) if work_dir is not None else cfg.work_dir()
+    sweep_csv = work_dir / f"ihc_threshold_sweep_panel_{panel}.csv"
     rows = _read_sweep_rows(sweep_csv)
     summaries = summarize_thresholds(
         rows,
@@ -261,13 +263,15 @@ def build_dashboard(
         )
 
     refs = _configured_sections(cfg, panel)
-    out_dir = cfg.work_dir() / "ihc_manual_review"
+    out_dir = work_dir / "ihc_manual_review"
     out_dir.mkdir(parents=True, exist_ok=True)
     html_path = out_dir / f"panel_{panel}_threshold_review.html"
     template_path = out_dir / f"panel_{panel}_threshold_signoff_template.json"
     template = _decision_template(cfg, panel, refs, candidates)
     template_path.write_text(json.dumps(template, indent=2) + "\n")
-    html_path.write_text(_render_html(cfg, panel, refs, summaries, candidates, html_path, template))
+    html_path.write_text(
+        _render_html(cfg, panel, refs, summaries, candidates, html_path, template, work_dir)
+    )
     return html_path, template_path, summaries
 
 
@@ -314,13 +318,14 @@ def _render_html(
     candidates: list[ThresholdSummary],
     html_path: Path,
     template: dict,
+    work_dir: Path,
 ) -> str:
     candidate_values = {s.threshold for s in candidates}
     title = f"{cfg.animal_id} Panel {panel} IgG-FITC Manual Threshold Review"
-    sections_html = "\n".join(_section_card(cfg, ref, html_path) for ref in refs)
+    sections_html = "\n".join(_section_card(work_dir, ref, html_path) for ref in refs)
     summary_rows = "\n".join(_summary_row(s) for s in summaries)
     candidate_panels = "\n".join(
-        _candidate_threshold_panel(cfg, panel, refs, s.threshold, html_path)
+        _candidate_threshold_panel(work_dir, panel, refs, s.threshold, html_path)
         for s in summaries
         if s.threshold in candidate_values
     )
@@ -449,8 +454,8 @@ def _summary_row(summary: ThresholdSummary) -> str:
     """
 
 
-def _section_card(cfg: Config, ref: SectionRef, html_path: Path) -> str:
-    thumb = _qc_thumbnail(cfg, ref)
+def _section_card(work_dir: Path, ref: SectionRef, html_path: Path) -> str:
+    thumb = _qc_thumbnail(work_dir, ref)
     checked = "checked" if ref.selected and not ref.excluded else ""
     state = "selected" if ref.selected else "excluded" if ref.excluded else "unclassified"
     img = (
@@ -474,7 +479,7 @@ def _section_card(cfg: Config, ref: SectionRef, html_path: Path) -> str:
 
 
 def _candidate_threshold_panel(
-    cfg: Config,
+    work_dir: Path,
     panel: str,
     refs: list[SectionRef],
     threshold: float,
@@ -485,7 +490,7 @@ def _candidate_threshold_panel(
     for ref in refs:
         if not ref.selected or ref.excluded:
             continue
-        review_dir = _review_dir(cfg, ref)
+        review_dir = _review_dir(work_dir, ref)
         raw = review_dir / "fitc_raw.png"
         overlay = review_dir / f"threshold_{label}.png"
         if not overlay.exists():

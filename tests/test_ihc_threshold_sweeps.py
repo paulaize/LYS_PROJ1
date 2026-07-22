@@ -41,7 +41,7 @@ def test_threshold_sweep_commands_include_target_and_control_panel_a():
     assert any("target,artifact_exclude" in part for part in commands[0].argv)
 
 
-def test_threshold_sweep_commands_skip_unavailable_panel_b_control():
+def test_threshold_sweep_commands_include_all_unreviewed_panel_b_controls():
     runner = _load_runner()
     commands = runner.build_sweep_commands(
         REPO / "config/animals/BD_08_5D.yml",
@@ -49,20 +49,34 @@ def test_threshold_sweep_commands_skip_unavailable_panel_b_control():
         include_target=False,
     )
 
-    assert commands == []
+    assert len(commands) == 8
+    assert {cmd.source_animal for cmd in commands} == {"C6S5"}
+    assert {cmd.source_role for cmd in commands} == {"no_lys241_control"}
+    assert {cmd.section_id for cmd in commands} == {
+        "section_01",
+        "section_02",
+        "section_03",
+        "section_04",
+        "section_05",
+        "section_06",
+        "section_07",
+        "section_08",
+    }
 
 
-def test_threshold_sweep_commands_use_panel_b_target_selection_without_control():
+def test_threshold_sweep_commands_use_panel_b_target_and_unreviewed_controls():
     runner = _load_runner()
     commands = runner.build_sweep_commands(
         REPO / "config/animals/BD_08_5D.yml",
         panels="B",
     )
 
-    assert len(commands) == 3
-    assert {cmd.source_animal for cmd in commands} == {"BD_08_5D"}
-    assert {cmd.section_id for cmd in commands} == {"section_05", "section_06", "section_08"}
-    assert {cmd.series_index for cmd in commands} == {6, 7, 9}
+    assert len(commands) == 11
+    target = [cmd for cmd in commands if cmd.source_role == "target"]
+    controls = [cmd for cmd in commands if cmd.source_role == "no_lys241_control"]
+    assert {cmd.section_id for cmd in target} == {"section_05", "section_06", "section_08"}
+    assert {cmd.series_index for cmd in target} == {6, 7, 9}
+    assert len(controls) == 8
     assert all(cmd.panel == "B" for cmd in commands)
 
 
@@ -102,7 +116,8 @@ def test_threshold_review_thumbnail_commands_write_to_review_tree():
     assert all("ihc_threshold_review" in str(cmd.output_dir) for cmd in commands)
     assert all("export_threshold_review_thumbnails.groovy" in cmd.argv[-1] for cmd in commands)
     assert any("/panel_A/BD_08_5D_target/section_01" in part for part in commands[0].argv)
-    assert any(",32.0,tissue_v1,section_01,auto_if_missing," in part for part in commands[0].argv)
+    assert any(",64.0,tissue_v1,section_01,auto_if_missing," in part for part in commands[0].argv)
+    assert any(",32.0,tissue_v1,section_01,auto_if_missing," in part for part in commands[1].argv)
     assert any(",target,1400,artifact_exclude" in part for part in commands[0].argv)
 
 

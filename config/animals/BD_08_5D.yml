@@ -72,6 +72,9 @@ ihc:
       vsi_dir: "data/5D/IHC/panel_A"
       vsi_files:
         - "data/5D/IHC/panel_A/BD_08_5D Podo NeuroT IgG___01.vsi"
+      source_bundles:
+        - vsi_file: "data/5D/IHC/panel_A/BD_08_5D Podo NeuroT IgG___01.vsi"
+          companion_dir: "data/5D/IHC/panel_A/_BD_08_5D Podo NeuroT IgG___01_"
       overview_vsi: null
       section_selection:
         status: "selected_by_visual_qc"
@@ -98,6 +101,7 @@ ihc:
         1: "C2 FITC"
         2: "C3 CY3"
         3: "C4 CY5"
+      threshold_review_downsample: 64.0
       neurotrace_emission: "640/660 Deep-Red Fluorescent Nissl Stain"
       neurotrace_emission_confirmed: true
       neurotrace_emission_source: "accepted_for_v1_by_Paul (2026-06-17)"
@@ -108,6 +112,9 @@ ihc:
       vsi_dir: "data/5D/IHC/panel_B"
       vsi_files:
         - "data/5D/IHC/panel_B/BD_08_5D IBA1 GFAP IgG_01.vsi"
+      source_bundles:
+        - vsi_file: "data/5D/IHC/panel_B/BD_08_5D IBA1 GFAP IgG_01.vsi"
+          companion_dir: "data/5D/IHC/panel_B/_BD_08_5D IBA1 GFAP IgG_01_"
       overview_vsi: null
       section_selection:
         status: "selected_by_visual_qc"

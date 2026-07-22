@@ -152,3 +152,20 @@ def test_write_tidy_measurements_preserves_quantification_provenance(tmp_path: P
     assert fitc["tissue_qc"] == "rough_tissue_auto_unreviewed"
     assert fitc["threshold_status"] == "exploratory_not_final"
     assert fitc["igg_fitc_threshold"] == 250
+
+
+def test_quantification_accepts_explicit_auto_candidate_status():
+    runner = _load_runner()
+    commands = runner.build_quantification_commands(
+        REPO / "config/animals/BD_08_5D.yml",
+        panels="A",
+        threshold=250,
+        exploratory=True,
+        tissue_mode="auto_if_missing",
+        use_default_signoff=False,
+        threshold_status_override="threshold_auto_candidate_exploratory",
+    )
+
+    assert {cmd.threshold_status for cmd in commands} == {
+        "threshold_auto_candidate_exploratory"
+    }

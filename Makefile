@@ -3,7 +3,7 @@ CONFIG ?= config/animals/TEMPLATE.yml
 IHC ?=
 RUN_ARGS ?=
 
-.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-section-qc ihc-threshold-sweeps ihc-threshold-review ihc-threshold-dashboard ihc-threshold-signoff ihc-quantify run clean
+.PHONY: env-check test lint convert-mri calibrate-ihc ihc-diagnose ihc-section-qc ihc-threshold-sweeps ihc-threshold-review ihc-threshold-dashboard ihc-threshold-signoff ihc-quantify ihc-one-animal run clean
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
@@ -40,6 +40,9 @@ ihc-threshold-signoff:
 
 ihc-quantify:
 	conda run -n $(ENV) python scripts/run_ihc_quantification.py --config $(CONFIG) $(RUN_ARGS)
+
+ihc-one-animal:
+	conda run -n $(ENV) python scripts/run_ihc_one_animal.py --config $(CONFIG) $(RUN_ARGS)
 
 # Run one animal:
 #   make run CONFIG=config/animals/BD_08_5D.yml RUN_ARGS=--no-mask-editor [IHC=work/BD_08_5D/ihc_A.csv]

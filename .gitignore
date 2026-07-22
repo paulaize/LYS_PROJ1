@@ -1,5 +1,5 @@
 # Data / outputs — read-only inputs and generated files (see AGENTS.md §4)
-data/
+/data
 work/
 outputs/
 
