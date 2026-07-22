@@ -1,6 +1,6 @@
 # Documentation
 
-This training branch intentionally keeps four detailed references:
+This training branch intentionally keeps five detailed references:
 
 1. [ratlesnetv2_lys_v1_kaggle_workflow.md](ratlesnetv2_lys_v1_kaggle_workflow.md)
    — active step-by-step experiment, decision gates, frozen test, and artifact
@@ -15,6 +15,9 @@ This training branch intentionally keeps four detailed references:
 4. [ratlesnetv2_mac_inference.md](ratlesnetv2_mac_inference.md) — package the
    frozen five-model ensemble and run draft-mask inference on unlabeled scans
    with Apple MPS or CPU.
+5. [t2w_allen_atlas_mapping.md](t2w_allen_atlas_mapping.md) — stage inferred
+   T2w cases for AIDAmri v3, ingest subject-space Allen annotations, review
+   registration, and calculate native-grid lesion-by-region summaries.
 
 Use [../AGENTS.md](../AGENTS.md) for branch rules and [../README.md](../README.md)
 for orientation. Preparation utility details live in

@@ -73,6 +73,15 @@ fully recorded options. Local preparation/rebuild commands are summarized in
 Frozen five-model inference on unlabeled scans is documented in
 [docs/ratlesnetv2_mac_inference.md](docs/ratlesnetv2_mac_inference.md).
 
+## Downstream Allen atlas mapping
+
+The first MRI-to-atlas adapter is documented in
+[docs/t2w_allen_atlas_mapping.md](docs/t2w_allen_atlas_mapping.md). It stages
+frozen inference inputs for AIDAmri v3, validates subject-space atlas labels,
+generates registration QC overlays, and reports native-space lesion overlap by
+atlas region. Atlas analysis is downstream of the frozen lesion model and must
+not feed back into model selection or the locked-test protocol.
+
 ## Active package
 
 ```text

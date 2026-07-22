@@ -20,6 +20,7 @@ build/
 .ipynb_checkpoints/
 *.ipynb
 !notebooks/lys_v2_architecture_comparator_kaggle.ipynb
+!notebooks/external_mouse_ratlesnetv2_nnunet_kaggle.ipynb
 
 # Environments
 .env

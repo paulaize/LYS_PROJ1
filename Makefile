@@ -12,6 +12,11 @@ RATLESNET_CONFIG ?= ratlesnetv2_finetune/configs/dataset_template.yml
 .PHONY: ratlesnetv2-split-prepared ratlesnetv2-audit ratlesnetv2-grouped-cv
 .PHONY: ratlesnetv2-calibrate-threshold ratlesnetv2-evaluate-ensemble
 .PHONY: ratlesnetv2-infer run clean
+.PHONY: atlas-prepare-aidamri atlas-prepare-partial-slab atlas-prepare-partial-registration
+.PHONY: atlas-validate-partial-registration
+.PHONY: atlas-validate-partial-affine
+.PHONY: atlas-validate-partial-nonlinear-diagnostic
+.PHONY: atlas-normalize-aidamri-structures atlas-summarize
 
 env-check:
 	conda run -n $(ENV) python scripts/check_env.py
@@ -81,6 +86,30 @@ ratlesnetv2-evaluate-ensemble:
 
 ratlesnetv2-infer:
 	conda run -n $(ENV) python -m ratlesnetv2_finetune.scripts.infer_ratlesnetv2_ensemble $(RUN_ARGS)
+
+atlas-prepare-aidamri:
+	conda run -n $(ENV) python -m src.atlas.prepare_aidamri_inputs $(RUN_ARGS)
+
+atlas-prepare-partial-slab:
+	MPLCONFIGDIR=work/.matplotlib XDG_CACHE_HOME=work/.cache conda run -n $(ENV) python -m src.atlas.prepare_partial_aidamri_slab $(RUN_ARGS)
+
+atlas-prepare-partial-registration:
+	conda run -n $(ENV) python -m src.atlas.prepare_constrained_partial_registration $(RUN_ARGS)
+
+atlas-validate-partial-registration:
+	MPLCONFIGDIR=work/.matplotlib XDG_CACHE_HOME=work/.cache conda run -n $(ENV) python -m src.atlas.validate_constrained_partial_registration $(RUN_ARGS)
+
+atlas-validate-partial-affine:
+	MPLCONFIGDIR=work/.matplotlib XDG_CACHE_HOME=work/.cache conda run -n $(ENV) python -m src.atlas.validate_constrained_affine_registration $(RUN_ARGS)
+
+atlas-validate-partial-nonlinear-diagnostic:
+	MPLCONFIGDIR=work/.matplotlib XDG_CACHE_HOME=work/.cache conda run -n $(ENV) python -m src.atlas.validate_nonlinear_diagnostic $(RUN_ARGS)
+
+atlas-normalize-aidamri-structures:
+	conda run -n $(ENV) python -m src.atlas.normalize_aidamri_structures $(RUN_ARGS)
+
+atlas-summarize:
+	MPLCONFIGDIR=work/.matplotlib XDG_CACHE_HOME=work/.cache conda run -n $(ENV) python -m src.atlas.summarize_t2w_atlas_mapping $(RUN_ARGS)
 
 # Run one animal:
 #   make run CONFIG=config/animals/BD_08_5D.yml RUN_ARGS=--no-mask-editor [IHC=work/BD_08_5D/ihc_A.csv]
