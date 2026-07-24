@@ -35,6 +35,11 @@ on the same preserved development folds. It is a separate protocol and does
 not reopen the locked test:
 [notebooks/lys_v2_architecture_comparator_kaggle.ipynb](notebooks/lys_v2_architecture_comparator_kaggle.ipynb).
 
+The separate LYS v3 deployment comparator screens the official standard 3-D
+nnU-Net against the ResEnc-M deployment cost without using external data or
+materializing the locked test:
+[notebooks/lys_v3_standard_nnunet_kaggle.ipynb](notebooks/lys_v3_standard_nnunet_kaggle.ipynb).
+
 ## Current datasets
 
 - `LYS_T2w_manual_v1`: 258 corrected target cases, expected spacing
